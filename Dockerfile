@@ -24,4 +24,4 @@ WORKDIR /app/Site
 RUN bun run build
 
 # # run the app
-ENTRYPOINT ["bun", "-b", "./build"]
+CMD ["bun", "run", "build/index.js"]
