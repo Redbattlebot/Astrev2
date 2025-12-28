@@ -18,8 +18,8 @@ ENV PATH=$PATH:/usr/local/go/bin
 COPY . .
 
 # 3. Build the Economy Service
-# We name the output 'economy' (all lowercase) as many Go frameworks expect this
-RUN cd [Ee]conomy && \
+# Using the exact name from your screenshot
+RUN ls -F && cd Economy && \
     if [ ! -f go.mod ]; then go mod init economy; fi && \
     go mod tidy && \
     go build -o economy .
@@ -37,6 +37,5 @@ EXPOSE 10000
 EXPOSE 8000
 
 # 6. Start the main app
-# We use the absolute path to bun to ensure it triggers correctly
 WORKDIR /app/Site
 CMD ["/usr/local/bin/bun", "build/index.js"]
