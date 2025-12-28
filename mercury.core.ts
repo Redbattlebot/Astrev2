@@ -1,7 +1,7 @@
 // Configuration file for Rosilo.
 export default {
 	Name: "Rosilo",
-	Domain: "rosilo.onrender.com", // Update this to your actual Render URL
+	Domain: "astrev.onrender.com", // Update this to your actual Render URL
 	DatabaseURL: "http://localhost:8000",
 	RCCServiceProxyURL: "http://localhost:64990",
 	OrbiterPrivateURL: "http://localhost:64991",
