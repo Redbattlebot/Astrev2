@@ -17,8 +17,6 @@ ENV NODE_ENV=production
 
 EXPOSE 10000
 
-# THE FINAL FIX: 
-# We use the shell form (no brackets) to let the OS find Bun.
-# We point to the build folder created by the Svelte adapter.
-WORKDIR /app/Site
-CMD bun build/index.js
+# Direct execution with absolute path - no lookups, no indirection
+# We tell Bun exactly: "Execute this specific JavaScript file, right now"
+CMD ["/usr/local/bin/bun", "build/index.js"]
