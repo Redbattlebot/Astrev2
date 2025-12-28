@@ -1,35 +1,27 @@
-# Step 1: Base Image
-FROM oven/bun:latest AS base
+# Use the official Bun image
+FROM oven/bun:latest
+
+# Set the working directory
 WORKDIR /app
 
-# Step 2: Install dependencies
-FROM base AS install
-RUN mkdir -p /temp/prod
-COPY Site/package.json Site/bun.lockb* Site/bun.lock /temp/prod/
-# We use || true in case bun.lock doesn't exist yet
-RUN cd /temp/prod && bun install --frozen-lockfile || bun install
+# Copy the entire project first
+COPY . .
 
-# Step 3: Release Image
-FROM oven/bun:latest AS release
-WORKDIR /app
+# Install dependencies for the whole project
+RUN bun install
 
-# Copy dependencies and source code
-COPY --from=install /temp/prod/node_modules /app/Site/node_modules
-COPY Assets /app/Assets
-COPY Site /app/Site
-COPY mercury.core.ts /app/mercury.core.ts
-
-# Build the app inside the Site directory
+# Move into the Site directory and build the SvelteKit app
 WORKDIR /app/Site
 RUN bun run build
+
+# Set Environment Variables for Render
+ENV HOST=0.0.0.0
+ENV PORT=10000
+ENV NODE_ENV=production
 
 # Expose the port
 EXPOSE 10000
 
-# Set environment variable to ensure it listens on all interfaces
-ENV HOST=0.0.0.0
-ENV PORT=10000
-
-# The Final Start Command
-# Using the absolute path to bun prevents the $PATH error
-CMD ["/usr/local/bin/bun", "run", "build/index.js"]
+# THE FIX: Use the absolute path to Bun and point to the built index.js
+# This avoids the "$PATH" error entirely.
+CMD ["/usr/local/bin/bun", "build/index.js"]
