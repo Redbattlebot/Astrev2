@@ -1,5 +1,4 @@
 FROM oven/bun:latest
-
 WORKDIR /app
 
 # 1. Install SurrealDB (as root)
@@ -7,9 +6,8 @@ USER root
 RUN apt-get update && apt-get install -y curl
 RUN curl -sSf https://install.surrealdb.com | sh
 
-# 2. Fix the Symlink path 
-# (The installer usually puts the binary in /root/.surrealdb/bin/surreal)
-RUN ln -s /root/.surrealdb/bin/surreal /usr/local/bin/surreal
+# 2. No symlink needed - the installer already creates it!
+# The installer automatically places surreal in /usr/local/bin
 
 # 3. Copy everything (while still root to ensure permissions)
 COPY . .
