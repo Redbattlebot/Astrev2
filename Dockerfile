@@ -23,5 +23,8 @@ COPY mercury.core.ts mercury.core.ts
 WORKDIR /app/Site
 RUN bun run build
 
-# # run the app
+# Tell Render to use Port 10000
+EXPOSE 10000
+
+# The fixed command to start the server
 CMD ["bun", "run", "build/index.js"]
