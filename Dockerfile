@@ -10,12 +10,15 @@ RUN curl -LO https://go.dev/dl/go1.21.6.linux-amd64.tar.gz \
     && tar -C /usr/local -xzf go1.21.6.linux-amd64.tar.gz
 ENV PATH=$PATH:/usr/local/go/bin
 
-# 2. Copy everything from your project
+# 2. COPY THE ECONOMY FOLDER EXPLICITLY
+# This bypasses any .dockerignore issues for this specific folder
+COPY ./Economy ./Economy
 COPY . .
 
 # 3. Build the Economy Service
-# We go directly into the folder shown in your screenshot
 WORKDIR /app/Economy
+# Let's list the files in the logs so we can see them!
+RUN ls -la 
 RUN go mod tidy
 RUN go build -o economy-service .
 
@@ -31,6 +34,5 @@ ENV NODE_ENV=production
 EXPOSE 10000
 EXPOSE 8000
 
-# Point back to Site for the start command
 WORKDIR /app/Site
 CMD ["/usr/local/bin/bun", "build/index.js"]
