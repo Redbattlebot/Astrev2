@@ -1,23 +1,25 @@
-// Configuration file for Rosilo.
+// Configuration file for Mercury Core. Hover over a property to see its description!
+// If you're running in production, you'll need to rebuild Mercury Core to apply changes.
+
 export default {
 	Name: "Rosilo",
-	Domain: "astrev.onrender.com", 
+	Domain: "astrev.onrender.com",
 	DatabaseURL: "http://localhost:8000",
 	RCCServiceProxyURL: "http://localhost:64990",
 	OrbiterPrivateURL: "http://localhost:64991",
 	OrbiterPublicDomain: "localhost:64992",
-	LauncherURI: "rosilo-launcher:",
-	CurrencySymbol: "R$", 
+	LauncherURI: "mercury-launcher:",
+	CurrencySymbol: "屌",
 	Pages: ["Statistics", "Forum", "Groups"],
 
-	// Purple/Space 'noob' colours
+	// Updated to 'Spacy' Rosilo colors (Deep Purples and Darks)
 	DefaultBodyColors: {
-		Head: 24,    // Grey
-		LeftArm: 24, 
-		LeftLeg: 1007, // Royal Purple
-		RightArm: 24,
-		RightLeg: 1007,
-		Torso: 1007,
+		Head: 1031,      // Deep Royal Purple
+		LeftArm: 1031,   // Deep Royal Purple
+		LeftLeg: 1032,   // Midnight Blue/Purple
+		RightArm: 1031,  // Deep Royal Purple
+		RightLeg: 1032,  // Midnight Blue/Purple
+		Torso: 1030,     // Dark Obsidian
 	},
 
 	Logging: {
@@ -27,16 +29,16 @@ export default {
 	},
 
 	Branding: {
-		Favicon: "Branding/Favicon.png", // Changed to PNG
-		Icon: "Branding/Icon.png",       // Changed to PNG
-		Tagline: "The Galaxy of Creation",
+		Favicon: "Branding/Favicon.png",
+		Icon: "Branding/Icon.png",
+		Tagline: "Revival tagline",
 		Descriptions: {
-			"Endless Possibilities":
-				"Rosilo is a vast creaative universe where you can create, play, and explore with friends.",
-			"Servers we have":
-				"Our  servers ensure a fast, secure, and stable experience for all players. *not garunteed",
-			"Join the Community":
-				"A social platform designed for creators",
+			"Endless possibilites":
+				"Create or play your favourite games and customise your character with items on our catalog.",
+			"New features":
+				"In addition to full client usability, additional features such as security fixes, QoL fixes and an easy to use website make your experience better.",
+			"Same nostalgia":
+				"All of our clients will remain as vanilla as possible, to make sure it's exactly as you remember it.",
 		},
 	},
 
@@ -51,8 +53,8 @@ export default {
 
 	Themes: [
 		{
-			Name: "Rosilo Space",
-			Path: "Themes/Rosilo.css", 
+			Name: "Standard",
+			Path: "Themes/Standard.css",
 		},
 	],
 
@@ -65,7 +67,7 @@ export default {
 	Registration: {
 		Keys: {
 			Enabled: true,
-			Prefix: "rosilo-",
+			Prefix: "mercurkey-",
 		},
 		Emails: true,
 	},
@@ -79,4 +81,4 @@ export default {
 	Gameservers: {
 		Hosting: "Both",
 	},
-}
+} satisfies import("./Assets/schema.ts").Config
