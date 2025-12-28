@@ -15,9 +15,11 @@ ENV PATH=$PATH:/usr/local/go/bin
 # 2. Copy the entire project
 COPY . .
 
-# 3. Build the Economy Service
-# Since the folder is confirmed at the root, we run the build directly.
-RUN cd Economy && \
+# 3. Build the Economy Service (Deep Search Fix)
+# This finds the folder even if Linux has trouble with the name/path
+RUN ACTUAL_ECONOMY=$(find . -maxdepth 2 -name "*conomy*" -type d | head -n 1) && \
+    echo "Found Economy folder at: $ACTUAL_ECONOMY" && \
+    cd "$ACTUAL_ECONOMY" && \
     mkdir -p data && \
     go mod tidy || (go mod init economy && go mod tidy) && \
     go build -o Economy . && \
