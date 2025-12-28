@@ -4,14 +4,16 @@ FROM oven/bun:latest
 # Set the working directory
 WORKDIR /app
 
-# Copy the entire project first
+# Copy the entire repository into the container
 COPY . .
 
-# Install dependencies for the whole project
+# Move into the Site directory where package.json actually lives
+WORKDIR /app/Site
+
+# Install dependencies inside the Site folder
 RUN bun install
 
-# Move into the Site directory and build the SvelteKit app
-WORKDIR /app/Site
+# Build the SvelteKit app
 RUN bun run build
 
 # Set Environment Variables for Render
@@ -22,6 +24,6 @@ ENV NODE_ENV=production
 # Expose the port
 EXPOSE 10000
 
-# THE FIX: Use the absolute path to Bun and point to the built index.js
-# This avoids the "$PATH" error entirely.
+# The command to start the server
+# Since we are already in /app/Site, the path is build/index.js
 CMD ["/usr/local/bin/bun", "build/index.js"]
