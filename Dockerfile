@@ -4,10 +4,10 @@ FROM oven/bun:latest
 # Set the working directory
 WORKDIR /app
 
-# Copy everything
+# Copy the entire project
 COPY . .
 
-# Move to Site and install/build
+# Move into the Site directory and install/build
 WORKDIR /app/Site
 RUN bun install
 RUN bun run build
@@ -20,6 +20,6 @@ ENV NODE_ENV=production
 # Expose the port
 EXPOSE 10000
 
-# THE CHANGE: Use "Shell" format instead of ["JSON", "format"]
-# This forces the container to find bun automatically.
-CMD bun build/index.js
+# THE "HARD" FIX: Using ENTRYPOINT with the absolute path to Bun
+# This bypasses the $PATH entirely and forces Render to execute the binary.
+ENTRYPOINT ["/usr/local/bin/bun", "build/index.js"]
