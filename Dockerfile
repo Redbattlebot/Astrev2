@@ -15,22 +15,13 @@ ENV PATH=$PATH:/usr/local/go/bin
 # 2. Copy the entire project
 COPY . .
 
-# 3. Build the Economy Service (Case-Insensitive Safety Fix)
-RUN FOLDER=$( [ -d "Economy" ] && echo "Economy" || ([ -d "economy" ] && echo "economy") ); \
-    if [ -n "$FOLDER" ]; then \
-        echo "Building Economy from folder: $FOLDER"; \
-        cd $FOLDER && \
-        mkdir -p data && \
-        go mod tidy || (go mod init economy && go mod tidy) && \
-        go build -o Economy . && \
-        chmod +x Economy; \
-    else \
-        echo "CRITICAL WARNING: Economy folder not found in GitHub context!"; \
-        mkdir -p Economy/data && \
-        echo 'package main\nimport "fmt"\nimport "time"\nfunc main() { for { fmt.Println("Real Economy source missing from GitHub!"); time.Sleep(time.Hour) } }' > Economy/main.go && \
-        cd Economy && go mod init economy && go build -o Economy . && \
-        chmod +x Economy; \
-    fi
+# 3. Build the Economy Service
+# Since the folder is confirmed at the root, we run the build directly.
+RUN cd Economy && \
+    mkdir -p data && \
+    go mod tidy || (go mod init economy && go mod tidy) && \
+    go build -o Economy . && \
+    chmod +x Economy
 
 # 4. Build the SvelteKit Site
 WORKDIR /app/Site
