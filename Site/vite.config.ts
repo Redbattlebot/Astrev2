@@ -2,7 +2,6 @@ import { sveltekit } from "@sveltejs/kit/vite"
 import extractorSvelte from "@unocss/extractor-svelte"
 import UnoCSS from "unocss/vite"
 import { defineConfig } from "vite"
-import devtoolsJson from "vite-plugin-devtools-json"
 
 export default defineConfig({
 	plugins: [
@@ -14,7 +13,6 @@ export default defineConfig({
 		},
 		UnoCSS({ extractors: [extractorSvelte] }),
 		sveltekit(),
-		devtoolsJson(),
 	],
 	ssr: { noExternal: ["d3-interpolate"] },
 })
