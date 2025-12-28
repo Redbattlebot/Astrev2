@@ -1,25 +1,29 @@
-# Use the official Bun image
+# 1. Use the official Bun image
 FROM oven/bun:latest
 
-# Set the working directory
+# 2. Set the working directory to /app
 WORKDIR /app
 
-# Copy the entire project
+# 3. Copy EVERYTHING from your GitHub into the container
 COPY . .
 
-# Move into the Site directory and install/build
+# 4. Move into the Site folder where the actual website code is
 WORKDIR /app/Site
+
+# 5. Install the dependencies
 RUN bun install
+
+# 6. Build the SvelteKit project (creates the /build folder)
 RUN bun run build
 
-# Set Environment Variables
+# 7. Set necessary Environment Variables for Render
 ENV HOST=0.0.0.0
 ENV PORT=10000
 ENV NODE_ENV=production
 
-# Expose the port
+# 8. Tell Render which port to look at
 EXPOSE 10000
 
-# THE "HARD" FIX: Using ENTRYPOINT with the absolute path to Bun
-# This bypasses the $PATH entirely and forces Render to execute the binary.
-ENTRYPOINT ["/usr/local/bin/bun", "build/index.js"]
+# 9. THE START COMMAND (The Full Path Fix)
+# This points directly to the bun engine and the built index file
+CMD ["/usr/local/bin/bun", "run", "build/index.js"]
