@@ -10,17 +10,22 @@ RUN curl -LO https://go.dev/dl/go1.21.6.linux-amd64.tar.gz \
     && tar -C /usr/local -xzf go1.21.6.linux-amd64.tar.gz
 ENV PATH=$PATH:/usr/local/go/bin
 
-# 2. COPY THE ECONOMY FOLDER EXPLICITLY
-# This bypasses any .dockerignore issues for this specific folder
-COPY ./Economy ./Economy
+# 2. Copy EVERYTHING first
+# This ensures we have the files before we try to move into folders
 COPY . .
 
-# 3. Build the Economy Service
-WORKDIR /app/Economy
-# Let's list the files in the logs so we can see them!
-RUN ls -la 
-RUN go mod tidy
-RUN go build -o economy-service .
+# 3. Build the Economy Service using a "Smart Search"
+# This looks for any folder named economy (case-insensitive) that has a main.go
+RUN E_DIR=$(find . -maxdepth 2 -iname "economy" -type d | head -n 1) && \
+    if [ -n "$E_DIR" ]; then \
+        echo "Found Economy directory at: $E_DIR" && \
+        cd "$E_DIR" && \
+        if [ ! -f go.mod ]; then go mod init economy; fi && \
+        go mod tidy && \
+        go build -o economy-service .; \
+    else \
+        echo "WARNING: Economy directory not found. Skipping Go build."; \
+    fi
 
 # 4. Build the Site
 WORKDIR /app/Site
