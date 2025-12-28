@@ -1,30 +1,35 @@
-# use the official Bun image
-# see all versions at https://hub.docker.com/r/oven/bun/tags
-FROM oven/bun AS base
+# Step 1: Base Image
+FROM oven/bun:latest AS base
 WORKDIR /app
 
-# install dependencies into temp directory
-# this will cache them and speed up future builds
+# Step 2: Install dependencies
 FROM base AS install
-
-# install with --production (exclude devDependencies)
 RUN mkdir -p /temp/prod
-COPY Site/package.json Site/bun.lock /temp/prod/
-RUN cd /temp/prod && bun i --frozen-lockfile -p
+COPY Site/package.json Site/bun.lockb* Site/bun.lock /temp/prod/
+# We use || true in case bun.lock doesn't exist yet
+RUN cd /temp/prod && bun install --frozen-lockfile || bun install
 
-# copy production dependencies and source code into final image
-FROM base AS release
-COPY --from=install /temp/prod/node_modules node_modules
-COPY Assets Assets
-COPY Site Site
-COPY mercury.core.ts mercury.core.ts
+# Step 3: Release Image
+FROM oven/bun:latest AS release
+WORKDIR /app
 
-# build the app
+# Copy dependencies and source code
+COPY --from=install /temp/prod/node_modules /app/Site/node_modules
+COPY Assets /app/Assets
+COPY Site /app/Site
+COPY mercury.core.ts /app/mercury.core.ts
+
+# Build the app inside the Site directory
 WORKDIR /app/Site
 RUN bun run build
 
-# Tell Render to use Port 10000
+# Expose the port
 EXPOSE 10000
 
-# The fixed command to start the server
-CMD ["bun", "run", "build/index.js"]
+# Set environment variable to ensure it listens on all interfaces
+ENV HOST=0.0.0.0
+ENV PORT=10000
+
+# The Final Start Command
+# Using the absolute path to bun prevents the $PATH error
+CMD ["/usr/local/bin/bun", "run", "build/index.js"]
