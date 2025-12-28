@@ -2,8 +2,8 @@
 // If you're running in production, you'll need to rebuild Mercury Core to apply changes.
 
 export default {
-	Name: "Rosilo",
-	Domain: "astrev.onrender.com",
+	Name: "Mercury",
+	Domain: "mercs.dev",
 	DatabaseURL: "http://localhost:8000",
 	RCCServiceProxyURL: "http://localhost:64990",
 	OrbiterPrivateURL: "http://localhost:64991",
@@ -12,14 +12,14 @@ export default {
 	CurrencySymbol: "屌",
 	Pages: ["Statistics", "Forum", "Groups"],
 
-	// Updated to 'Spacy' Rosilo colors (Deep Purples and Darks)
+	// 'noob' colours
 	DefaultBodyColors: {
-		Head: 1031,      // Deep Royal Purple
-		LeftArm: 1031,   // Deep Royal Purple
-		LeftLeg: 1032,   // Midnight Blue/Purple
-		RightArm: 1031,  // Deep Royal Purple
-		RightLeg: 1032,  // Midnight Blue/Purple
-		Torso: 1030,     // Dark Obsidian
+		Head: 24,
+		LeftArm: 24,
+		LeftLeg: 119,
+		RightArm: 24,
+		RightLeg: 119,
+		Torso: 23,
 	},
 
 	Logging: {
@@ -29,8 +29,8 @@ export default {
 	},
 
 	Branding: {
-		Favicon: "Branding/Favicon.png",
-		Icon: "Branding/Icon.png",
+		Favicon: "Branding/Favicon.svg",
+		Icon: "Branding/Icon.svg",
 		Tagline: "Revival tagline",
 		Descriptions: {
 			"Endless possibilites":
