@@ -1,4 +1,4 @@
-package ledger_test
+package ledger
 
 import (
 	"fmt"
