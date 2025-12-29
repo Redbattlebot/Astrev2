@@ -1,16 +1,12 @@
 package ledger
 
 import (
-	"encoding/json"
+	"errors"
 	"fmt"
-	"net/http"
-	"os"
 	"time"
 
 	"github.com/surrealdb/surrealdb.go"
-	c "github.com/TwiN/go-color"
-
-	. "Economy/ledger"
+	gonanoid "github.com/matoous/go-nanoid/v2"
 )
 
 const stipendTime = 12 * 60 * 60 * 1000
