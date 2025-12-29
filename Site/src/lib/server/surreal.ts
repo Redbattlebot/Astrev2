@@ -9,7 +9,6 @@ import initQuery from "$lib/server/init.surql"
 import logo from "$lib/server/logo"
 
 // --- 1. EXPORTS ---
-// These MUST be exported so your API routes and other files can import them
 export const db = new Surreal()
 
 const ogq = db.query.bind(db)
@@ -32,45 +31,58 @@ export const version = db.version.bind(db)
 
 // --- 2. AUTHENTICATION LOGIC ---
 async function reconnect() {
-    for (let attempt = 1; ; attempt++) {
-        try {
-            await db.close();
-            console.log(`🚀 Attempt ${attempt}: Using Legacy Root Auth...`);
-            
-            await db.connect("wss://rosilo-06dmf6lsidp67225aee6c67su4.aws-usw2.surreal.cloud/rpc");
-            
-            // 1. Authenticate (This passed in your last log!)
-            await db.signin({
-                username: "rosilo_owner",
-                password: "Protogenslol1",
-            } as any);
+	for (let attempt = 1; ; attempt++) {
+		try {
+			await db.close();
+			console.log(`🚀 Attempt ${attempt}: Using Legacy Root Auth...`);
+			
+			await db.connect("wss://rosilo-06dmf6lsidp67225aee6c67su4.aws-usw2.surreal.cloud/rpc");
+			
+			// Legacy Root Authentication
+			await db.signin({
+				username: "rosilo_owner",
+				password: "Protogenslol1",
+			} as any);
 
-            // 2. CRITICAL: We must AWAIT the use command 
-            // before the code moves on to db.query(initQuery)
-            await db.use({ ns: "Rosilo", db: "rosilo" });
-            
-            console.log("✅ AUTH SUCCESS! Root session established and Namespace selected.");
-            break;
-        } catch (err) {
-            const e = err as Error;
-            console.error(`❌ Connection failed: ${e.message}`);
-            if (attempt >= 3) break;
-            await new Promise(resolve => setTimeout(resolve, 2000));
-        }
-    }
+			// Await the context switch
+			await db.use({ ns: "rosilo", db: "rosilo" });
+			
+			console.log("✅ AUTH SUCCESS! Root session established and Namespace selected.");
+			break;
+		} catch (err) {
+			const e = err as Error;
+			console.error(`❌ Connection failed: ${e.message}`);
+			if (attempt >= 3) break;
+			await new Promise(resolve => setTimeout(resolve, 2000));
+		}
+	}
 }
 
-// --- Authentication Execution ---
+// --- Authentication & Initialization Execution ---
 if (!building) {
-    // 1. Wait for the connection AND the NS/DB selection to finish
-    await reconnect(); 
+	// 1. Wait for the connection to finish
+	await reconnect(); 
 
-    // 2. Now that we are 100% sure we are in the 'Rosilo' namespace, run the schema
-    console.log("🛠️ Running initial schema query...");
-    await db.query(initQuery);
+	// 2. Short delay to allow the WebSocket state to stabilize
+	await new Promise(resolve => setTimeout(resolve, 500));
 
-    // 3. Success!
-    logo();
+	try {
+		console.log("🛠️ Running initial schema query...");
+		
+		/**
+		 * BULLETPROOF OVERRIDE: 
+		 * We explicitly prepend the USE command to the schema query.
+		 * This prevents the "Specify a namespace to use" error by forcing the 
+		 * database context regardless of connection-state race conditions.
+		 */
+		await db.query(`USE NS Rosilo DB rosilo; ${initQuery}`);
+
+		console.log("✅ Schema initialized successfully!");
+		logo();
+	} catch (err) {
+		const e = err as Error;
+		console.error(`❌ Schema Query Failed: ${e.message}`);
+	}
 }
 
 // --- 3. HELPER TYPES & FUNCTIONS ---
