@@ -1,35 +1,31 @@
-# Config file for compose, a tool that allows for easily managing multiple containers.
-# https://docs.docker.com/compose/
-
+# Updated for SurrealDB Cloud - Local database service removed
 services:
-    database:
-        # not :nightly because doing that once caused failures when graph linking
-        # and also caused errors with query parameters (twice)
-        build: ./Database
-        ports:
-            - 8000:8000
-        restart: unless-stopped
-        volumes:
-            - ./data/surreal:/database
-        command:
-            - start
-            - -u=root
-            - -p=root
-            - surrealkv://database
-
     economy:
-        build: ./Economy
+        build: 
+            context: .
+            dockerfile: Dockerfile
         ports:
-            - 2009:2009
+            - "2009:2009"
         restart: unless-stopped
+        environment:
+            - DB_URL=${DB_URL}
+            - SURREAL_USER=${SURREAL_USER}
+            - SURREAL_PASS=${SURREAL_PASS}
+            - SURREAL_NS=${SURREAL_NS}
+            - SURREAL_DB=${SURREAL_DB}
         volumes:
             - ./data/economy:/data/economy
 
     site:
-        build: .
+        build: 
+            context: .
+            dockerfile: Dockerfile
         ports:
-            - 4443:4443
+            - "10000:10000"
         restart: unless-stopped
+        # Dependency on local 'database' removed to prevent startup crashes
         depends_on:
-            - database # will keep retrying until database is ready
             - economy
+        environment:
+            - ORIGIN=https://astrev.onrender.com
+            - DATABASE_URL=${DB_URL}
