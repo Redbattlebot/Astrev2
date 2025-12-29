@@ -96,7 +96,7 @@ func NewEconomy(db *surrealdb.DB) (e *Economy, err error) {
 }
 
 func (e *Economy) loadFromCloud() error {
-	// Request as map[string]any
+	// Select returns *[]map[string]any
 	data, err := surrealdb.Select[map[string]any](context.Background(), e.db, "ledger")
 	if err != nil {
 		return err
@@ -106,9 +106,13 @@ func (e *Economy) loadFromCloud() error {
 		return nil
 	}
 
-	// We range over the slice. Each 'event' is a map[string]any
-	for _, event := range *data {
-		// Use type assertion to ensure the compiler treats it as a map
+	for _, rawEvent := range *data {
+		// FIX: Manually cast the 'any' type to a map so it's indexable
+		event, ok := any(rawEvent).(map[string]any)
+		if !ok {
+			continue
+		}
+
 		amountRaw, _ := event["Amount"].(float64)
 		amount := Currency(amountRaw)
 
