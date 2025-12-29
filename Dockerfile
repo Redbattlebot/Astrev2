@@ -2,13 +2,15 @@
 FROM golang:1.23-alpine AS go-builder
 WORKDIR /app
 COPY . .
-# Explicitly enter the Economy folder
+# Enter the Economy directory
 WORKDIR /app/Economy
+# Initialize and build. 
+# We output the binary directly into this folder so the path is predictable.
 RUN rm -f go.mod go.sum || true && \
     go mod init Economy && \
     go get github.com/surrealdb/surrealdb.go@v1.0.0 && \
     go mod tidy && \
-    go build -o /app/Economy_Binary .
+    go build -o Economy_Binary .
 
 # --- STAGE 2: Build SvelteKit Site ---
 FROM oven/bun:latest AS bun-builder
@@ -29,6 +31,7 @@ ENV NODE_ENV=production
 ENV ORIGIN=https://astrev.onrender.com
 
 # Copy artifacts from build stages
+# Note: The path is now /app/Economy/Economy_Binary to match Stage 1
 COPY --from=go-builder /app/Economy/Economy_Binary /usr/local/bin/Economy_Binary
 COPY --from=bun-builder /app/Site/build /app/Site/build
 COPY --from=bun-builder /app/Site/package.json /app/Site/package.json
@@ -37,5 +40,4 @@ COPY --from=bun-builder /app/Site/node_modules /app/Site/node_modules
 EXPOSE 10000
 
 # Start Economy and SvelteKit together
-# Using /bin/sh -c ensures the background process (&) is handled correctly
 CMD ["sh", "-c", "Economy_Binary & bun run /app/Site/build/index.js"]
