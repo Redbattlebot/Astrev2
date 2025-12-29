@@ -44,7 +44,7 @@ async function reconnect() {
 			// 'access: "root"' ensures you have permissions to run initQuery
 			await db.signin({
 				username: "rosilo_owner",
-				password: "YOUR_PASSWORD_HERE", // <-- Put your actual password here
+				password: "Protogenslol1", // <-- Put your actual password here
 				access: "root",
 				namespace: undefined,
 				database: undefined
