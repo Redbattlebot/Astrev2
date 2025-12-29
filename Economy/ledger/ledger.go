@@ -2,7 +2,6 @@ package ledger
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -97,8 +96,8 @@ func NewEconomy(db *surrealdb.DB) (e *Economy, err error) {
 }
 
 func (e *Economy) loadFromCloud() error {
-	// Select returns *[]map[string]interface{}
-	data, err := surrealdb.Select[map[string]interface{}](context.Background(), e.db, "ledger")
+	// FIX: Use a concrete map type in the generic so Go knows it's indexable
+	data, err := surrealdb.Select[map[string]any](context.Background(), e.db, "ledger")
 	if err != nil {
 		return err
 	}
@@ -107,8 +106,8 @@ func (e *Economy) loadFromCloud() error {
 		return nil
 	}
 
-	// Dereference the pointer to range over the slice
 	for _, event := range *data {
+		// event is now map[string]any, which is indexable
 		amountRaw, _ := event["Amount"].(float64)
 		amount := Currency(amountRaw)
 
@@ -197,11 +196,9 @@ func (e *Economy) Stipend(to User) error {
 }
 
 func (e *Economy) LastNTransactions(validate func(tx map[string]any) bool, n int) ([]map[string]any, error) {
-	// Query returns *[]QueryResult[[]map[string]any]
-	raw, err := surrealdb.Query[[]map[string]any](context.Background(), e.db, "SELECT * FROM ledger ORDER BY Time DESC LIMIT $n", map[string]interface{}{"n": n})
+	raw, err := surrealdb.Query[[]map[string]any](context.Background(), e.db, "SELECT * FROM ledger ORDER BY Time DESC LIMIT $n", map[string]any{"n": n})
 	if err != nil { return nil, err }
 	
-	// Dereference the pointer, check length, and return the .Result of the first query
 	if raw != nil && len(*raw) > 0 {
 		return (*raw)[0].Result, nil
 	}
