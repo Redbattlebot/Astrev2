@@ -35,52 +35,42 @@ async function reconnect() {
 	for (let attempt = 1; ; attempt++) {
 		try {
 			await db.close() 
-			console.log(`🚀 Attempt ${attempt}: Connecting as System Root (rosilo_owner)...`)
+			console.log(`🚀 Attempt ${attempt}: Using Legacy Root Auth...`)
 			
-			// Establish connection to your Cloud instance
 			await db.connect("wss://rosilo-06dmf6lsidp67225aee6c67su4.aws-usw2.surreal.cloud/rpc")
 			
-			// Sign in using the Root user from your screenshot
-			// 'access: "root"' ensures you have permissions to run initQuery
+			// If we omit 'access', the SDK tries to log in as a global Root user
+			// This often solves the "Access method does not exist" error
 			await db.signin({
 				username: "rosilo_owner",
-				password: "Protogenslol1", // <-- Put your actual password here
-				access: "root",
-				namespace: undefined,
-				database: undefined
+				password: "Protogenslol1",
+				// We intentionally omit 'access' here to use default root auth
 			} as any)
 
-			// Select the target Namespace and Database
 			await db.use({ ns: "Rosilo", db: "rosilo" })
 			
-			console.log("✅ AUTH SUCCESS! Root session established.")
+			console.log("✅ AUTH SUCCESS! Root session established via Legacy Auth.")
 			break
 		} catch (err) {
 			const e = err as Error
 			console.error(`❌ Connection failed: ${e.message}`)
 			
-			// Fallback: If Root access is rejected, try Namespace-level access
+			// If Legacy fails, try 'root' as the access name (common in SurrealDB 2.x)
 			if (attempt === 1) {
 				try {
-					console.log("🔄 Retrying with Namespace Scope...")
+					console.log("🔄 Retrying with access: 'root'...")
 					await db.signin({
 						username: "rosilo_owner",
-						password: "YOUR_PASSWORD_HERE",
-						namespace: "Rosilo",
-						database: "rosilo",
-						access: "namespace" 
+						password: "YOUR_PASSWORD",
+						access: "root"
 					} as any)
-					console.log("✅ AUTH SUCCESS (Namespace Level)")
+					await db.use({ ns: "Rosilo", db: "rosilo" })
+					console.log("✅ AUTH SUCCESS (Access: root)")
 					break
-				} catch (inner) { 
-					console.error("❌ Namespace fallback failed:", (inner as Error).message) 
-				}
+				} catch (inner) { console.error("❌ Root fallback also failed.") }
 			}
 
-			if (attempt >= 3) {
-				console.error("MAX ATTEMPTS REACHED. Please check credentials in Cloud Console.")
-				break
-			}
+			if (attempt >= 3) break
 			await new Promise(resolve => setTimeout(resolve, 2000))
 		}
 	}
