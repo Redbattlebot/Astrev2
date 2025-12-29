@@ -1,12 +1,14 @@
 # --- STAGE 1: Build Go Economy Service ---
-FROM golang:1.21-alpine AS go-builder
+# Bumped to 1.23 to satisfy SurrealDB driver requirements
+FROM golang:1.23-alpine AS go-builder
 WORKDIR /app
 COPY . .
 RUN ACTUAL_ECONOMY=$(find . -maxdepth 2 -name "*conomy*" -type d | head -n 1) && \
     cd "$ACTUAL_ECONOMY" && \
-    # We remove any existing mod to ensure a fresh build
     rm -f go.mod go.sum || true && \
     go mod init Economy && \
+    # Ensure we get the latest compatible driver
+    go get github.com/surrealdb/surrealdb.go@v1.0.0 && \
     go mod tidy && \
     go build -o /app/Economy_Binary .
 
