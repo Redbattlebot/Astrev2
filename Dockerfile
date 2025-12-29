@@ -32,7 +32,7 @@ ENV ORIGIN=https://astrev.onrender.com
 # --- COPY ARTIFACTS ---
 COPY --from=go-builder /app/Economy/Economy_Binary /usr/local/bin/Economy_Binary
 COPY --from=bun-builder /app/Site/build /app/Site/build
-COPY --from=bun-builder /app/Site/package.json /app/Site/package.json
+COPY --from=bun-builder /app/Assets /app/Site/Assets
 COPY --from=bun-builder /app/Site/node_modules /app/Site/node_modules
 
 # FIX: Copy the Assets folder so the CSS files actually exist in the container!
