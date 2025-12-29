@@ -16,19 +16,21 @@ const DB_CONFIG = {
 	ns: "rosilo",
 	db: "rosilo",
 	user: "rosilo_owner",
-	pass: "Ewt%gu(sn9s%MgU*UGxMPKs"
+	// Use process.env.DB_PASSWORD in Render for extra security!
+	pass: "Ewt%gu(sn9s%MgU*UGxMPKs" 
 };
 
-// --- 2. EXPORTS & SELF-HEALING WRAPPER ---
+// --- 2. EXPORTS & SMART WRAPPER ---
 export const db = new Surreal()
 
 const ogq = db.query.bind(db)
 const retriable = "This transaction can be retried"
 
 /**
- * IMPROVED WRAPPER:
- * 1. Automatically prepends 'USE NS...DB...' to ensure context.
- * 2. Logs exact query failures for easier debugging on Render.
+ * SMART WRAPPER:
+ * 1. Injects Namespace/DB context.
+ * 2. FLATTENS results: If the query has 1 statement, it returns the result set directly.
+ * This prevents the [[user]] vs [user] error in hundreds of files.
  */
 db.query = async <T extends unknown[]>(
 	...args: QueryParameters
@@ -37,7 +39,16 @@ db.query = async <T extends unknown[]>(
 		if (typeof args[0] === 'string' && !args[0].trim().startsWith('USE ')) {
 			args[0] = `USE NS ${DB_CONFIG.ns} DB ${DB_CONFIG.db}; ${args[0]}`;
 		}
-		return (await ogq(...args)) as Prettify<T>
+
+		const raw = await ogq(...args);
+
+		// --- THE FLATTENER ---
+		// If it's a single statement query, return the inner array so [user] works.
+		if (Array.isArray(raw) && raw.length === 1) {
+			return raw[0] as Prettify<T>;
+		}
+
+		return raw as Prettify<T>
 	} catch (err) {
 		const e = err as Error
 		if (e.message.endsWith(retriable)) {
@@ -83,10 +94,10 @@ async function reconnect() {
 
 // --- 4. STARTUP & ASSET CHECK ---
 if (!building) {
-	// Debugging the ENOENT Error: Check if CSS exists where the app expects it
+	// Debugging path issues on Render/Linux
 	const cssPath = path.resolve(process.cwd(), "Assets/Themes/Standard.css");
 	if (!fs.existsSync(cssPath)) {
-		console.warn(`⚠️ ASSET WARNING: CSS file not found at ${cssPath}. This will cause a 500 error on the frontend.`);
+		console.warn(`⚠️ ASSET WARNING: CSS file not found at ${cssPath}. Check case-sensitivity (Assets vs assets).`);
 	}
 
 	await reconnect(); 
@@ -94,11 +105,12 @@ if (!building) {
 
 	try {
 		console.log("🛠️ Initializing Schema...");
-		await db.query(initQuery);
+		// Running the full init script
+		await ogq(initQuery); 
 		console.log("✅ Schema Synced.");
 		logo();
 	} catch (err) {
-		console.error("❌ Schema sync skipped or failed.");
+		console.error("❌ Schema sync failed. Check your init.surql syntax.");
 	}
 }
 
@@ -119,11 +131,11 @@ export type RecordId<T extends keyof RecordIdTypes> = SurrealRecordId<T>
 export const Record = <T extends keyof RecordIdTypes>(table: T, id: RecordIdTypes[T]) => new SurrealRecordId(table, id)
 
 export async function find<T extends keyof RecordIdTypes>(table: T, id: RecordIdTypes[T]) {
-	const [result] = await db.query<boolean[]>("!!SELECT 1 FROM $thing", { thing: Record(table, id) })
-	return result
+	const result = await db.query<boolean[]>("!!SELECT 1 FROM $thing", { thing: Record(table, id) })
+	return result[0]
 }
 
 export async function findWhere(table: keyof RecordIdTypes, where: string, params?: { [_: string]: unknown }) {
-	const [res] = await db.query<boolean[]>(`!!SELECT 1 FROM type::table($table) WHERE ${where}`, { ...params, table })
-	return res
+	const res = await db.query<boolean[]>(`!!SELECT 1 FROM type::table($table) WHERE ${where}`, { ...params, table })
+	return res[0]
 }
