@@ -28,22 +28,27 @@ actions.default = async ({ cookies, request }) => {
 	const { username, password } = form.data
 	form.data.password = ""
 
-	const [[user]] = await db.query<
-		{
-			id: RecordId<"user">
-			hashedPassword: string
-		}[][]
-	>(userQuery, { username })
+	// 1. SAFE MATRIX QUERY
+	// Avoid [[user]] because if SurrealDB returns more than one result set, it crashes.
+	const results = await db.query<any[][]>(userQuery, { username })
+	
+	// Grab the first user found in the first result set
+	const user = results[0]?.[0]
 
-	// remove this statement and we'll end up like Mercury 1 💀
-	if (!user || !Bun.password.verifySync(password, user.hashedPassword))
+	// 2. VERIFY USER & PASSWORD
+	// Combined check for security (don't reveal if the user exists or not)
+	if (!user || !user.hashedPassword || !Bun.password.verifySync(password, user.hashedPassword)) {
 		return formError(
 			form,
 			["username", "password"],
-			[" ", "Incorrect username or password"] // Don't give any extra information which may be useful to attackers
+			[" ", "Incorrect username or password"] 
 		)
+	}
 
-	cookies.set(cookieName, await createSession(user.id), cookieOptions)
+	// 3. CREATE SESSION
+	// We pass user.id to match the RecordId type createSession expects
+	const sessionToken = await createSession(user.id)
+	cookies.set(cookieName, sessionToken, cookieOptions)
 
 	redirect(302, "/home")
 }
