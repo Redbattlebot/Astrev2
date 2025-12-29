@@ -1,6 +1,7 @@
 package ledger
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -16,7 +17,7 @@ func RandId() string {
 	return id
 }
 
-// --- TYPE DEFINITIONS (This fixes 'undefined: Currency') ---
+// --- TYPE DEFINITIONS ---
 
 type (
 	User      string
@@ -29,11 +30,11 @@ type (
 type Assets map[Asset]uint64
 
 const (
-	Micro Currency = 1
-	Milli          = 1e3 * Micro
-	Unit           = 1e6 * Micro 
-	Stipend        = 10 * Unit
-	BasicallyInfinity = ^uint64(0) / 2
+	Micro             Currency = 1
+	Milli                      = 1e3 * Micro
+	Unit                       = 1e6 * Micro
+	Stipend                    = 10 * Unit
+	BasicallyInfinity          = ^uint64(0) / 2
 )
 
 // --- STRUCTS ---
@@ -97,21 +98,33 @@ func NewEconomy(db *surrealdb.DB) (e *Economy, err error) {
 	return
 }
 
+// Helper to handle SurrealDB data conversion
+func unmarshal(data interface{}, v interface{}) error {
+	// Convert the raw map/interface response to JSON bytes
+	bytes, err := json.Marshal(data)
+	if err != nil {
+		return err
+	}
+	// Convert JSON bytes back into our Go struct
+	return json.Unmarshal(bytes, v)
+}
+
 func (e *Economy) loadFromCloud() error {
+	// Use Select to get raw data
 	data, err := e.db.Select("ledger")
 	if err != nil {
 		return err
 	}
 
 	var events []map[string]interface{}
-	// Unmarshal the raw database response
-	if err := surrealdb.Unmarshal(data, &events); err != nil {
+	// FIX: Use our custom unmarshal helper instead of the missing library function
+	if err := unmarshal(data, &events); err != nil {
 		return err
 	}
 
 	for _, event := range events {
 		amount := Currency(event["Amount"].(float64))
-		
+
 		if to, ok := event["To"].(string); ok && event["From"] != nil {
 			// Transaction
 			from := event["From"].(string)
@@ -134,30 +147,42 @@ func (e *Economy) loadFromCloud() error {
 // --- CORE METHODS ---
 
 func (e *Economy) Transact(sent SentTx) error {
-	if err := e.validateTx(sent); err != nil { return err }
-	
+	if err := e.validateTx(sent); err != nil {
+		return err
+	}
+
 	tx := Tx{sent, uint64(time.Now().UnixMilli()), RandId()}
-	if _, err := e.db.Create("ledger", tx); err != nil { return err }
+	if _, err := e.db.Create("ledger", tx); err != nil {
+		return err
+	}
 
 	e.loadTx(tx)
 	return nil
 }
 
 func (e *Economy) Mint(sent SentMint) error {
-	if err := e.validateMint(sent); err != nil { return err }
+	if err := e.validateMint(sent); err != nil {
+		return err
+	}
 
 	mint := Mint{sent, uint64(time.Now().UnixMilli()), RandId()}
-	if _, err := e.db.Create("ledger", mint); err != nil { return err }
+	if _, err := e.db.Create("ledger", mint); err != nil {
+		return err
+	}
 
 	e.loadMint(mint)
 	return nil
 }
 
 func (e *Economy) Burn(sent SentBurn) error {
-	if err := e.validateBurn(sent); err != nil { return err }
+	if err := e.validateBurn(sent); err != nil {
+		return err
+	}
 
 	burn := Burn{sent, uint64(time.Now().UnixMilli()), RandId()}
-	if _, err := e.db.Create("ledger", burn); err != nil { return err }
+	if _, err := e.db.Create("ledger", burn); err != nil {
+		return err
+	}
 
 	e.loadBurn(burn)
 	return nil
@@ -166,8 +191,12 @@ func (e *Economy) Burn(sent SentBurn) error {
 // --- VALIDATION & HELPERS ---
 
 func (e *Economy) validateTx(sent SentTx) error {
-	if sent.Amount == 0 { return errors.New("must have amount") }
-	if sent.From == "" || sent.To == "" { return errors.New("missing sender or receiver") }
+	if sent.Amount == 0 {
+		return errors.New("must have amount")
+	}
+	if sent.From == "" || sent.To == "" {
+		return errors.New("missing sender or receiver")
+	}
 	if total := sent.Amount; total > e.balances[sent.From] {
 		return fmt.Errorf("insufficient balance: %s required", total.Readable())
 	}
@@ -175,13 +204,19 @@ func (e *Economy) validateTx(sent SentTx) error {
 }
 
 func (e *Economy) validateMint(sent SentMint) error {
-	if sent.Amount == 0 { return errors.New("mint must have amount") }
+	if sent.Amount == 0 {
+		return errors.New("mint must have amount")
+	}
 	return nil
 }
 
 func (e *Economy) validateBurn(sent SentBurn) error {
-	if sent.Amount == 0 { return errors.New("burn must have amount") }
-	if sent.Amount > e.balances[sent.From] { return errors.New("insufficient balance to burn") }
+	if sent.Amount == 0 {
+		return errors.New("burn must have amount")
+	}
+	if sent.Amount > e.balances[sent.From] {
+		return errors.New("insufficient balance to burn")
+	}
 	return nil
 }
 
@@ -192,29 +227,36 @@ func (e *Economy) loadTx(tx Tx) {
 
 func (e *Economy) loadMint(mint Mint) {
 	e.balances[mint.To] += mint.Amount
-	if mint.Note == "Stipend" { e.prevStipends[mint.To] = mint.Time }
+	if mint.Note == "Stipend" {
+		e.prevStipends[mint.To] = mint.Time
+	}
 }
 
 func (e *Economy) loadBurn(burn Burn) {
 	e.balances[burn.From] -= burn.Amount
 }
 
-func (e *Economy) GetBalance(u User) Currency { return e.balances[u] }
-func (e *Economy) GetInventory(u User) Assets { return e.inventories[u] }
-func (e *Economy) GetPrevStipend(u User) uint64 { return e.prevStipends[u] }
+func (e *Economy) GetBalance(u User) Currency    { return e.balances[u] }
+func (e *Economy) GetInventory(u User) Assets    { return e.inventories[u] }
+func (e *Economy) GetPrevStipend(u User) uint64  { return e.prevStipends[u] }
 func (e *Economy) Stipend(to User) error {
 	return e.Mint(SentMint{to, Currency(Stipend), "Stipend"})
 }
 
 func (e *Economy) LastNTransactions(validate func(tx map[string]any) bool, n int) ([]map[string]any, error) {
+	// Use Query and standard unmarshal
 	data, err := e.db.Query("SELECT * FROM ledger ORDER BY Time DESC LIMIT $n", map[string]interface{}{"n": n})
-	if err != nil { return nil, err }
-	
-	// Complex unmarshal handling for query results might be needed depending on driver version,
-	// but this generic unmarshal is the standard starting point.
+	if err != nil {
+		return nil, err
+	}
+
 	var result []map[string]any
-	// SurrealDB driver returns an array of query results. We usually want the first result's "result" field.
-	// But let's try direct unmarshal first or adjust if the specific driver signature varies.
-	surrealdb.Unmarshal(data, &result)
+	// The query returns an array of results, we typically want the first one's content
+	if err := unmarshal(data, &result); err != nil {
+		return nil, err
+	}
+	// Depending on driver structure, 'result' might be wrapped.
+	// For v1.0, Query often returns []interface{}.
+	// We return generic map for safety here.
 	return result, nil
 }
