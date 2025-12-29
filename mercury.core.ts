@@ -5,9 +5,9 @@ export default {
 	Name: "Rosilo",
 	Domain: "astrev.onrender.com",
 	// Updated to your SurrealDB Cloud Endpoint
-	DatabaseURL: "https://rosilo-06dmf6lsidp67225aee6c67su4.aws-usw2.surreal.cloud",
-	DatabaseUser: "root", 
-	DatabasePass: "YOUR_CLOUD_PASSWORD", // Replace with the password you set in Surreal Cloud
+	DatabaseURL: "wss://rosilo-06dmf6lsidp67225aee6c67su4.aws-usw2.surreal.cloud/rpc",
+	DatabaseUser: "rosilo_admin", 
+	DatabasePass: "Protogenslol1", // Replace with the password you set in Surreal Cloud
 	DatabaseNamespace: "rosilo",
 	DatabaseName: "rosilo",
 
@@ -15,7 +15,7 @@ export default {
 	OrbiterPrivateURL: "http://localhost:64991",
 	OrbiterPublicDomain: "localhost:64992",
 	LauncherURI: "mercury-launcher:",
-	CurrencySymbol: "屌",
+	CurrencySymbol: "R$",
 	Pages: ["Statistics", "Forum", "Groups"],
 
 	// 'noob' colours
