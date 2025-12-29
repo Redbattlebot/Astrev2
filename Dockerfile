@@ -17,6 +17,10 @@ RUN echo '#!/bin/sh\necho "Mercury: Cloud DB Link Active."\nsleep infinity' > /u
 COPY . .
 RUN ACTUAL_ECONOMY=$(find . -maxdepth 2 -name "*conomy*" -type d | head -n 1) && \
     cd "$ACTUAL_ECONOMY" && \
+    go mod init Economy || true && \
+    go get github.com/surrealdb/surrealdb.go && \
+    go get github.com/TwiN/go-color && \
+    go mod tidy && \
     go build -o /app/Economy_Binary . && \
     chmod +x /app/Economy_Binary
 
