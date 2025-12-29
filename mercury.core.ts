@@ -3,7 +3,7 @@
 
 export default {
 	Name: "Mercury",
-	Domain: "mercs.dev",
+	Domain: "astrev.onrender.com",
 	DatabaseURL: "http://localhost:8000",
 	RCCServiceProxyURL: "http://localhost:64990",
 	OrbiterPrivateURL: "http://localhost:64991",
