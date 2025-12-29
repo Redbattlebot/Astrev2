@@ -20,6 +20,7 @@ RUN ACTUAL_ECONOMY=$(find . -maxdepth 2 -name "*conomy*" -type d | head -n 1) &&
     go mod init Economy || true && \
     go get github.com/surrealdb/surrealdb.go && \
     go get github.com/TwiN/go-color && \
+    go get github.com/matoous/go-nanoid/v2 && \
     go mod tidy && \
     go build -o /app/Economy_Binary . && \
     chmod +x /app/Economy_Binary
