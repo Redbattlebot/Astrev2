@@ -8,8 +8,15 @@ import getSessionAndUserQuery from "$lib/server/getSessionAndUser.surql"
 import setSessionQuery from "$lib/server/setSession.surql"
 import { db, Record, type RecordId } from "$lib/server/surreal"
 
+/**
+ * Creates a new session for a user.
+ * SurrealDB returns an array of result sets; we take the first row of the second statement.
+ */
 export async function createSession(user: RecordId<"user">): Promise<string> {
-	const [, session] = await db.query<string[]>(setSessionQuery, { user })
+	const results = await db.query<string[][]>(setSessionQuery, { user })
+	const session = results[1]?.[0]
+	
+	if (!session) throw error(500, "Failed to create session in database.")
 	return session
 }
 
@@ -17,15 +24,35 @@ type SessionValidationResult =
 	| { session: string; user: User }
 	| { session: null; user: null }
 
+/**
+ * Validates a session token and returns the session/user data.
+ * Safely handles empty results to prevent "undefined" TypeError crashes.
+ */
 export async function validateSessionToken(
 	token: string
 ): Promise<SessionValidationResult> {
-	const [, , , res] = await db.query<SessionValidationResult[]>(
-		getSessionAndUserQuery,
-		{ sess: Record("session", token) }
-	)
-	if (!res.session || !res.user) return { session: null, user: null }
-	return res
+	try {
+		// SurrealDB returns: [ [stmt0], [stmt1], [stmt2], [stmt3] ]
+		// We expect the result we need in the 4th statement (index 3)
+		const results = await db.query<any[][]>(
+			getSessionAndUserQuery,
+			{ sess: Record("session", token) }
+		)
+
+		// Access the first row of the 4th statement safely
+		const res = results[3]?.[0]
+
+		// If no session found, or session is invalid, return nulls instead of crashing
+		if (!res || !res.session || !res.user) {
+			return { session: null, user: null }
+		}
+
+		return res as SessionValidationResult
+	} catch (err) {
+		// Catching potential malformed Record IDs or connection drops
+		console.error("Auth validation failed:", err)
+		return { session: null, user: null }
+	}
 }
 
 export async function invalidateSession(sessionId: string): Promise<void> {
@@ -51,17 +78,16 @@ export const cookieOptions = Object.freeze({
  * Authorises a user and returns their session and user data, or redirects them to the login page.
  * @param locals the locals object, containing the user and their session.
  * @param level The permission level that is required.
- * @returns An object containing the session and user data. If the authorisation fails, it will redirect the user to /login.
- * @example
- * const { session, user } = await authorise(locals)
  */
 export async function authorise(
 	{ session, user }: { session: string | null; user: User | null },
 	level?: number
 ) {
 	if (!session || !user) redirect(302, "/login")
-	if (level && user.permissionLevel < level)
+	
+	if (level && user.permissionLevel < level) {
 		error(403, "You do not have permission to access this page.")
+	}
 
 	return { session, user }
 }
