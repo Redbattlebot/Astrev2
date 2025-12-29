@@ -1,4 +1,4 @@
-package ledger
+package ledger // Matches the folder name
 
 import (
 	"fmt"
@@ -6,7 +6,8 @@ import (
 	"testing"
 
 	"github.com/surrealdb/surrealdb.go"
-	. "Economy/ledger"
+    // DELETE THE LINE BELOW IF IT EXISTS:
+	// . "Economy/ledger" 
 )
 
 type EconomyTest struct {
