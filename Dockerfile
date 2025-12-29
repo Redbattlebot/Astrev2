@@ -18,7 +18,7 @@ COPY . .
 RUN ACTUAL_ECONOMY=$(find . -maxdepth 2 -name "*conomy*" -type d | head -n 1) && \
     cd "$ACTUAL_ECONOMY" && \
     go mod init Economy || true && \
-    go get github.com/surrealdb/surrealdb.go@latest
+    go get github.com/surrealdb/surrealdb.go@latest && \
     go get github.com/TwiN/go-color && \
     go get github.com/matoous/go-nanoid/v2 && \
     go mod tidy && \
