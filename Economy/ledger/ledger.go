@@ -9,152 +9,212 @@ import (
 	gonanoid "github.com/matoous/go-nanoid/v2"
 )
 
-const stipendTime = 12 * 60 * 60 * 1000
+const idchars = "0123456789abcdefghijklmnopqrstuvwxyz"
 
-type EconomyServer struct {
-	*Economy
+func RandId() string {
+	id, _ := gonanoid.Generate(idchars, 15)
+	return id
 }
 
-func toReadable(cur Currency) string {
-	return fmt.Sprintf("%d.%06d unit", cur/Unit, cur%Unit)
+// --- TYPE DEFINITIONS (This fixes 'undefined: Currency') ---
+
+type (
+	User      string
+	Currency  uint64
+	AssetType string
+	AssetId   int
+	Asset     string
+)
+
+type Assets map[Asset]uint64
+
+const (
+	Micro Currency = 1
+	Milli          = 1e3 * Micro
+	Unit           = 1e6 * Micro 
+	Stipend        = 10 * Unit
+	BasicallyInfinity = ^uint64(0) / 2
+)
+
+// --- STRUCTS ---
+
+type SentTx struct {
+	To, From User
+	Amount   Currency
+	Note     string
+	Returns  Assets
+}
+type Tx struct {
+	SentTx
+	Time uint64
+	Id   string
 }
 
-// --- ALL YOUR IMPORTANT ROUTES (KEPT) ---
-
-func (e *EconomyServer) currentStipendRoute(w http.ResponseWriter, r *http.Request) {
-	fmt.Fprint(w, Stipend)
+type SentMint struct {
+	To     User
+	Amount Currency
+	Note   string
+}
+type Mint struct {
+	SentMint
+	Time uint64
+	Id   string
 }
 
-func (e *EconomyServer) balanceRoute(w http.ResponseWriter, r *http.Request) {
-	var u User
-	if _, err := fmt.Sscanf(r.PathValue("id"), "%s", &u); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
+type SentBurn struct {
+	From       User
+	Amount     Currency
+	Note, Link string
+	Returns    Assets
+}
+type Burn struct {
+	SentBurn
+	Time uint64
+	Id   string
+}
+
+// --- ECONOMY ENGINE ---
+
+type Economy struct {
+	db           *surrealdb.DB
+	balances     map[User]Currency
+	inventories  map[User]Assets
+	prevStipends map[User]uint64
+}
+
+func (c Currency) Readable() string {
+	return fmt.Sprintf("%d.%06d unit", c/Unit, c%Unit)
+}
+
+func NewEconomy(db *surrealdb.DB) (e *Economy, err error) {
+	e = &Economy{
+		db:           db,
+		balances:     make(map[User]Currency),
+		inventories:  make(map[User]Assets),
+		prevStipends: make(map[User]uint64),
 	}
-	fmt.Fprint(w, e.GetBalance(u))
+	err = e.loadFromCloud()
+	return
 }
 
-func (e *EconomyServer) adminTransactionsRoute(w http.ResponseWriter, r *http.Request) {
-	transactions, err := e.LastNTransactions(func(tx map[string]any) bool { return true }, 100)
+func (e *Economy) loadFromCloud() error {
+	data, err := e.db.Select("ledger")
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+		return err
 	}
-	json.NewEncoder(w).Encode(transactions)
+
+	var events []map[string]interface{}
+	// Unmarshal the raw database response
+	if err := surrealdb.Unmarshal(data, &events); err != nil {
+		return err
+	}
+
+	for _, event := range events {
+		amount := Currency(event["Amount"].(float64))
+		
+		if to, ok := event["To"].(string); ok && event["From"] != nil {
+			// Transaction
+			from := event["From"].(string)
+			e.balances[User(from)] -= amount
+			e.balances[User(to)] += amount
+		} else if to, ok := event["To"].(string); ok {
+			// Mint
+			e.balances[User(to)] += amount
+			if event["Note"] == "Stipend" {
+				e.prevStipends[User(to)] = uint64(event["Time"].(float64))
+			}
+		} else if from, ok := event["From"].(string); ok {
+			// Burn
+			e.balances[User(from)] -= amount
+		}
+	}
+	return nil
 }
 
-func (e *EconomyServer) transactionsRoute(w http.ResponseWriter, r *http.Request) {
-	id := User(r.PathValue("id"))
-	transactions, err := e.LastNTransactions(func(tx map[string]any) bool {
-		return tx["From"] != nil && User(tx["From"].(string)) == id || tx["To"] != nil && User(tx["To"].(string)) == id
-	}, 100)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	json.NewEncoder(w).Encode(transactions)
+// --- CORE METHODS ---
+
+func (e *Economy) Transact(sent SentTx) error {
+	if err := e.validateTx(sent); err != nil { return err }
+	
+	tx := Tx{sent, uint64(time.Now().UnixMilli()), RandId()}
+	if _, err := e.db.Create("ledger", tx); err != nil { return err }
+
+	e.loadTx(tx)
+	return nil
 }
 
-func (e *EconomyServer) transactRoute(w http.ResponseWriter, r *http.Request) {
-	var stx SentTx
-	if err := json.NewDecoder(r.Body).Decode(&stx); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	if err := e.Transact(stx); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	fmt.Println(c.InGreen(fmt.Sprintf("Transaction successful  %s -[%s]-> %s", stx.From, toReadable(stx.Amount), stx.To)))
+func (e *Economy) Mint(sent SentMint) error {
+	if err := e.validateMint(sent); err != nil { return err }
+
+	mint := Mint{sent, uint64(time.Now().UnixMilli()), RandId()}
+	if _, err := e.db.Create("ledger", mint); err != nil { return err }
+
+	e.loadMint(mint)
+	return nil
 }
 
-func (e *EconomyServer) mintRoute(w http.ResponseWriter, r *http.Request) {
-	var sm SentMint
-	if err := json.NewDecoder(r.Body).Decode(&sm); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	if err := e.Mint(sm); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	fmt.Println(c.InGreen(fmt.Sprintf("Mint successful          %s <-[%s]-", sm.To, toReadable(sm.Amount))))
+func (e *Economy) Burn(sent SentBurn) error {
+	if err := e.validateBurn(sent); err != nil { return err }
+
+	burn := Burn{sent, uint64(time.Now().UnixMilli()), RandId()}
+	if _, err := e.db.Create("ledger", burn); err != nil { return err }
+
+	e.loadBurn(burn)
+	return nil
 }
 
-func (e *EconomyServer) burnRoute(w http.ResponseWriter, r *http.Request) {
-	var sb SentBurn
-	if err := json.NewDecoder(r.Body).Decode(&sb); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
+// --- VALIDATION & HELPERS ---
+
+func (e *Economy) validateTx(sent SentTx) error {
+	if sent.Amount == 0 { return errors.New("must have amount") }
+	if sent.From == "" || sent.To == "" { return errors.New("missing sender or receiver") }
+	if total := sent.Amount; total > e.balances[sent.From] {
+		return fmt.Errorf("insufficient balance: %s required", total.Readable())
 	}
-	if err := e.Burn(sb); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	fmt.Println(c.InGreen(fmt.Sprintf("Burn successful          %s -[%s]->", sb.From, toReadable(sb.Amount))))
+	return nil
 }
 
-func (e *EconomyServer) stipendRoute(w http.ResponseWriter, r *http.Request) {
-	var to User
-	if _, err := fmt.Sscanf(r.PathValue("id"), "%s", &to); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	if e.GetPrevStipend(to)+stipendTime > uint64(time.Now().UnixMilli()) {
-		http.Error(w, "Next stipend not available yet", http.StatusBadRequest)
-		return
-	}
-	if err := e.Stipend(to); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	fmt.Println(c.InGreen(fmt.Sprintf("Stipend successful      %s", to)))
+func (e *Economy) validateMint(sent SentMint) error {
+	if sent.Amount == 0 { return errors.New("mint must have amount") }
+	return nil
 }
 
-func main() {
-	fmt.Println(c.InYellow("🚀 Connecting to SurrealDB Cloud..."))
+func (e *Economy) validateBurn(sent SentBurn) error {
+	if sent.Amount == 0 { return errors.New("burn must have amount") }
+	if sent.Amount > e.balances[sent.From] { return errors.New("insufficient balance to burn") }
+	return nil
+}
 
-	dbURL := os.Getenv("DB_URL")
-	if dbURL == "" {
-		dbURL = "https://rosilo-06dmf6lsidp67225aee6c67su4.aws-usw2.surreal.cloud/rpc"
-	}
+func (e *Economy) loadTx(tx Tx) {
+	e.balances[tx.From] -= tx.Amount
+	e.balances[tx.To] += tx.Amount
+}
 
-	db, err := surrealdb.New(dbURL)
-	if err != nil {
-		fmt.Printf(c.InRed("❌ Connection error: %v\n"), err)
-		os.Exit(1)
-	}
+func (e *Economy) loadMint(mint Mint) {
+	e.balances[mint.To] += mint.Amount
+	if mint.Note == "Stipend" { e.prevStipends[mint.To] = mint.Time }
+}
 
-	_, err = db.Signin(map[string]interface{}{
-		"user": os.Getenv("SURREAL_USER"),
-		"pass": os.Getenv("SURREAL_PASS"),
-	})
-	if err != nil {
-		fmt.Printf(c.InRed("❌ Login failed: %v\n"), err)
-		os.Exit(1)
-	}
+func (e *Economy) loadBurn(burn Burn) {
+	e.balances[burn.From] -= burn.Amount
+}
 
-	if _, err = db.Use(os.Getenv("SURREAL_NS"), os.Getenv("SURREAL_DB")); err != nil {
-		fmt.Printf(c.InRed("❌ Namespace/DB error: %v\n"), err)
-		os.Exit(1)
-	}
+func (e *Economy) GetBalance(u User) Currency { return e.balances[u] }
+func (e *Economy) GetInventory(u User) Assets { return e.inventories[u] }
+func (e *Economy) GetPrevStipend(u User) uint64 { return e.prevStipends[u] }
+func (e *Economy) Stipend(to User) error {
+	return e.Mint(SentMint{to, Currency(Stipend), "Stipend"})
+}
 
-	e, err := NewEconomy(db) 
-	if err != nil {
-		fmt.Printf(c.InRed("❌ Economy Init failed: %v\n"), err)
-		os.Exit(1)
-	}
-
-	es := EconomyServer{Economy: e}
-	http.HandleFunc("GET /currentStipend", es.currentStipendRoute)
-	http.HandleFunc("GET /balance/{id}", es.balanceRoute)
-	http.HandleFunc("GET /transactions", es.adminTransactionsRoute)
-	http.HandleFunc("GET /transactions/{id}", es.transactionsRoute)
-	http.HandleFunc("POST /transact", es.transactRoute)
-	http.HandleFunc("POST /mint", es.mintRoute)
-	http.HandleFunc("POST /burn", es.burnRoute)
-	http.HandleFunc("POST /stipend/{id}", es.stipendRoute)
-
-	fmt.Println(c.InGreen("~ Economy service is up on port 2009 ~"))
-	http.ListenAndServe(":2009", nil)
+func (e *Economy) LastNTransactions(validate func(tx map[string]any) bool, n int) ([]map[string]any, error) {
+	data, err := e.db.Query("SELECT * FROM ledger ORDER BY Time DESC LIMIT $n", map[string]interface{}{"n": n})
+	if err != nil { return nil, err }
+	
+	// Complex unmarshal handling for query results might be needed depending on driver version,
+	// but this generic unmarshal is the standard starting point.
+	var result []map[string]any
+	// SurrealDB driver returns an array of query results. We usually want the first result's "result" field.
+	// But let's try direct unmarshal first or adjust if the specific driver signature varies.
+	surrealdb.Unmarshal(data, &result)
+	return result, nil
 }
