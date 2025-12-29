@@ -1,188 +1,164 @@
-package ledger
+package main
 
 import (
-	"errors"
+	"encoding/json"
 	"fmt"
-	"math/rand"
+	"net/http"
+	"os"
 	"time"
 
 	"github.com/surrealdb/surrealdb.go"
-	gonanoid "github.com/matoous/go-nanoid/v2"
+	c "github.com/TwiN/go-color"
+
+	. "Economy/ledger"
 )
 
-const idchars = "0123456789abcdefghijklmnopqrstuvwxyz"
+const stipendTime = 12 * 60 * 60 * 1000
 
-// --- IMPORTANT TYPES & CONSTANTS (KEPT) ---
-
-type (
-	User      string
-	Currency  uint64
-	AssetType string
-	AssetId   int
-	Asset     string
-)
-
-const (
-	Micro Currency = 1
-	Milli          = 1e3 * Micro
-	Unit           = 1e6 * Micro 
-	Stipend        = 10 * Unit
-	BasicallyInfinity = ^uint64(0) / 2
-)
-
-type Assets map[Asset]uint64
-
-type SentTx struct {
-	To, From User
-	Amount   Currency
-	Note     string
-	Returns  Assets
-}
-type Tx struct {
-	SentTx
-	Time uint64
-	Id   string
+type EconomyServer struct {
+	*Economy
 }
 
-type SentMint struct {
-	To     User
-	Amount Currency
-	Note   string
-}
-type Mint struct {
-	SentMint
-	Time uint64
-	Id   string
+func toReadable(cur Currency) string {
+	return fmt.Sprintf("%d.%06d unit", cur/Unit, cur%Unit)
 }
 
-type SentBurn struct {
-	From       User
-	Amount     Currency
-	Note, Link string
-	Returns    Assets
-}
-type Burn struct {
-	SentBurn
-	Time uint64
-	Id   string
+// --- ALL YOUR IMPORTANT ROUTES (KEPT) ---
+
+func (e *EconomyServer) currentStipendRoute(w http.ResponseWriter, r *http.Request) {
+	fmt.Fprint(w, Stipend)
 }
 
-// --- ECONOMY ENGINE (UPDATED FOR CLOUD) ---
-
-type Economy struct {
-	db           *surrealdb.DB
-	balances     map[User]Currency
-	inventories  map[User]Assets
-	prevStipends map[User]uint64
-}
-
-func (c Currency) Readable() string {
-	return fmt.Sprintf("%d.%06d unit", c/Unit, c%Unit)
-}
-
-func RandId() string {
-	id, _ := gonanoid.Generate(idchars, 15)
-	return id
-}
-
-// NewEconomy: The new constructor that connects to the cloud
-func NewEconomy(db *surrealdb.DB) (e *Economy, err error) {
-	e = &Economy{
-		db:           db,
-		balances:     make(map[User]Currency),
-		inventories:  make(map[User]Assets),
-		prevStipends: make(map[User]uint64),
+func (e *EconomyServer) balanceRoute(w http.ResponseWriter, r *http.Request) {
+	var u User
+	if _, err := fmt.Sscanf(r.PathValue("id"), "%s", &u); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
 	}
-
-	// This replaces 'loadData' from your file system logic
-	if err = e.syncWithCloud(); err != nil {
-		return nil, fmt.Errorf("failed to sync ledger from cloud: %w", err)
-	}
-
-	return
+	fmt.Fprint(w, e.GetBalance(u))
 }
 
-// syncWithCloud: Replays the cloud ledger to build current balances
-func (e *Economy) syncWithCloud() error {
-	// Query SurrealDB for all ledger entries
-	data, err := e.db.Select("ledger")
+func (e *EconomyServer) adminTransactionsRoute(w http.ResponseWriter, r *http.Request) {
+	transactions, err := e.LastNTransactions(func(tx map[string]any) bool { return true }, 100)
 	if err != nil {
-		return err
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
 	}
-
-	var events []map[string]interface{}
-	if err := surrealdb.Unmarshal(data, &events); err != nil {
-		return err
-	}
-
-	for _, event := range events {
-		// Identify the type of entry and apply logic (The "Important Stuff")
-		if _, ok := event["To"]; ok && event["From"] != nil {
-			// It's a Transaction
-			e.balances[User(event["From"].(string))] -= Currency(event["Amount"].(float64))
-			e.balances[User(event["To"].(string))] += Currency(event["Amount"].(float64))
-		} else if _, ok := event["To"]; ok {
-			// It's a Mint
-			e.balances[User(event["To"].(string))] += Currency(event["Amount"].(float64))
-			if event["Note"] == "Stipend" {
-				e.prevStipends[User(event["To"].(string))] = uint64(event["Time"].(float64))
-			}
-		} else if _, ok := event["From"]; ok {
-			// It's a Burn
-			e.balances[User(event["From"].(string))] -= Currency(event["Amount"].(float64))
-		}
-	}
-	return nil
+	json.NewEncoder(w).Encode(transactions)
 }
 
-// --- CORE LOGIC METHODS (KEPT & UPDATED) ---
-
-func (e *Economy) Transact(sent SentTx) error {
-	if err := e.validateTx(sent); err != nil {
-		return err
+func (e *EconomyServer) transactionsRoute(w http.ResponseWriter, r *http.Request) {
+	id := User(r.PathValue("id"))
+	transactions, err := e.LastNTransactions(func(tx map[string]any) bool {
+		return tx["From"] != nil && User(tx["From"].(string)) == id || tx["To"] != nil && User(tx["To"].(string)) == id
+	}, 100)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
 	}
-	tx := Tx{sent, uint64(time.Now().UnixMilli()), RandId()}
-	
-	// Create record in SurrealDB 'ledger' table
-	if _, err := e.db.Create("ledger", tx); err != nil {
-		return err
-	}
-	
-	e.loadTx(tx) 
-	return nil
+	json.NewEncoder(w).Encode(transactions)
 }
 
-func (e *Economy) Mint(sent SentMint) error {
-	if err := e.validateMint(sent); err != nil {
-		return err
+func (e *EconomyServer) transactRoute(w http.ResponseWriter, r *http.Request) {
+	var stx SentTx
+	if err := json.NewDecoder(r.Body).Decode(&stx); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
 	}
-	mint := Mint{sent, uint64(time.Now().UnixMilli()), RandId()}
-	
-	if _, err := e.db.Create("ledger", mint); err != nil {
-		return err
+	if err := e.Transact(stx); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
 	}
-	
-	e.loadMint(mint)
-	return nil
+	fmt.Println(c.InGreen(fmt.Sprintf("Transaction successful  %s -[%s]-> %s", stx.From, toReadable(stx.Amount), stx.To)))
 }
 
-func (e *Economy) Burn(sent SentBurn) error {
-	if err := e.validateBurn(sent); err != nil {
-		return err
+func (e *EconomyServer) mintRoute(w http.ResponseWriter, r *http.Request) {
+	var sm SentMint
+	if err := json.NewDecoder(r.Body).Decode(&sm); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
 	}
-	burn := Burn{sent, uint64(time.Now().UnixMilli()), RandId()}
-	
-	if _, err := e.db.Create("ledger", burn); err != nil {
-		return err
+	if err := e.Mint(sm); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
 	}
-	
-	e.loadBurn(burn)
-	return nil
+	fmt.Println(c.InGreen(fmt.Sprintf("Mint successful          %s <-[%s]-", sm.To, toReadable(sm.Amount))))
 }
 
-// ... Keep your loadTx, loadMint, loadBurn, and all Validate functions ...
-// ... Keep GetBalance, GetUserCount, CCU, and Stats functions ...
+func (e *EconomyServer) burnRoute(w http.ResponseWriter, r *http.Request) {
+	var sb SentBurn
+	if err := json.NewDecoder(r.Body).Decode(&sb); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if err := e.Burn(sb); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	fmt.Println(c.InGreen(fmt.Sprintf("Burn successful          %s -[%s]->", sb.From, toReadable(sb.Amount))))
+}
 
-func (e *Economy) Stipend(to User) error {
-	return e.Mint(SentMint{to, Currency(Stipend), "Stipend"})
+func (e *EconomyServer) stipendRoute(w http.ResponseWriter, r *http.Request) {
+	var to User
+	if _, err := fmt.Sscanf(r.PathValue("id"), "%s", &to); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if e.GetPrevStipend(to)+stipendTime > uint64(time.Now().UnixMilli()) {
+		http.Error(w, "Next stipend not available yet", http.StatusBadRequest)
+		return
+	}
+	if err := e.Stipend(to); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	fmt.Println(c.InGreen(fmt.Sprintf("Stipend successful      %s", to)))
+}
+
+func main() {
+	fmt.Println(c.InYellow("🚀 Connecting to SurrealDB Cloud..."))
+
+	dbURL := os.Getenv("DB_URL")
+	if dbURL == "" {
+		dbURL = "https://rosilo-06dmf6lsidp67225aee6c67su4.aws-usw2.surreal.cloud/rpc"
+	}
+
+	db, err := surrealdb.New(dbURL)
+	if err != nil {
+		fmt.Printf(c.InRed("❌ Connection error: %v\n"), err)
+		os.Exit(1)
+	}
+
+	_, err = db.Signin(map[string]interface{}{
+		"user": os.Getenv("SURREAL_USER"),
+		"pass": os.Getenv("SURREAL_PASS"),
+	})
+	if err != nil {
+		fmt.Printf(c.InRed("❌ Login failed: %v\n"), err)
+		os.Exit(1)
+	}
+
+	if _, err = db.Use(os.Getenv("SURREAL_NS"), os.Getenv("SURREAL_DB")); err != nil {
+		fmt.Printf(c.InRed("❌ Namespace/DB error: %v\n"), err)
+		os.Exit(1)
+	}
+
+	e, err := NewEconomy(db) 
+	if err != nil {
+		fmt.Printf(c.InRed("❌ Economy Init failed: %v\n"), err)
+		os.Exit(1)
+	}
+
+	es := EconomyServer{Economy: e}
+	http.HandleFunc("GET /currentStipend", es.currentStipendRoute)
+	http.HandleFunc("GET /balance/{id}", es.balanceRoute)
+	http.HandleFunc("GET /transactions", es.adminTransactionsRoute)
+	http.HandleFunc("GET /transactions/{id}", es.transactionsRoute)
+	http.HandleFunc("POST /transact", es.transactRoute)
+	http.HandleFunc("POST /mint", es.mintRoute)
+	http.HandleFunc("POST /burn", es.burnRoute)
+	http.HandleFunc("POST /stipend/{id}", es.stipendRoute)
+
+	fmt.Println(c.InGreen("~ Economy service is up on port 2009 ~"))
+	http.ListenAndServe(":2009", nil)
 }
