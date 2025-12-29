@@ -96,7 +96,7 @@ func NewEconomy(db *surrealdb.DB) (e *Economy, err error) {
 }
 
 func (e *Economy) loadFromCloud() error {
-	// The driver returns *[]map[string]any. We use map[string]any so it is indexable.
+	// Request as map[string]any
 	data, err := surrealdb.Select[map[string]any](context.Background(), e.db, "ledger")
 	if err != nil {
 		return err
@@ -106,8 +106,9 @@ func (e *Economy) loadFromCloud() error {
 		return nil
 	}
 
-	// We must dereference the pointer (*data) to loop over the slice
+	// We range over the slice. Each 'event' is a map[string]any
 	for _, event := range *data {
+		// Use type assertion to ensure the compiler treats it as a map
 		amountRaw, _ := event["Amount"].(float64)
 		amount := Currency(amountRaw)
 
@@ -196,11 +197,9 @@ func (e *Economy) Stipend(to User) error {
 }
 
 func (e *Economy) LastNTransactions(validate func(tx map[string]any) bool, n int) ([]map[string]any, error) {
-	// Query returns *[]QueryResult[[]map[string]any]
 	raw, err := surrealdb.Query[[]map[string]any](context.Background(), e.db, "SELECT * FROM ledger ORDER BY Time DESC LIMIT $n", map[string]any{"n": n})
 	if err != nil { return nil, err }
 	
-	// Dereference the pointer, check that it's not nil, and grab the first statement's Result
 	if raw != nil && len(*raw) > 0 {
 		return (*raw)[0].Result, nil
 	}
