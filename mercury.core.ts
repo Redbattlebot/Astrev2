@@ -4,7 +4,13 @@
 export default {
 	Name: "Rosilo",
 	Domain: "astrev.onrender.com",
-	DatabaseURL: "http://localhost:8000",
+	// Updated to your SurrealDB Cloud Endpoint
+	DatabaseURL: "https://rosilo-06dmf6lsidp67225aee6c67su4.aws-usw2.surreal.cloud",
+	DatabaseUser: "root", 
+	DatabasePass: "YOUR_CLOUD_PASSWORD", // Replace with the password you set in Surreal Cloud
+	DatabaseNamespace: "rosilo",
+	DatabaseName: "rosilo",
+
 	RCCServiceProxyURL: "http://localhost:64990",
 	OrbiterPrivateURL: "http://localhost:64991",
 	OrbiterPublicDomain: "localhost:64992",
@@ -29,8 +35,8 @@ export default {
 	},
 
 	Branding: {
-		Favicon: "Branding/Favicon.png", // No ../ at the start
-    Icon: "Branding/Icon.png",     // No ../ at the start
+		Favicon: "Branding/Favicon.png", 
+		Icon: "Branding/Icon.png",
 		Tagline: "Welcome to Rosilo",
 		Descriptions: {
 			"Endless possibilites":
@@ -69,7 +75,7 @@ export default {
 			Enabled: true,
 			Prefix: "mercurkey-",
 		},
-		Emails: true,
+		Emails: false, // Set to false unless you have configured the SMTP settings below
 	},
 
 	Email: {
