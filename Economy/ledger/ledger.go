@@ -19,7 +19,6 @@ func RandId() string {
 }
 
 // --- TYPE DEFINITIONS ---
-
 type (
 	User      string
 	Currency  uint64
@@ -39,7 +38,6 @@ const (
 )
 
 // --- STRUCTS ---
-
 type SentTx struct {
 	To, From User
 	Amount   Currency
@@ -76,7 +74,6 @@ type Burn struct {
 }
 
 // --- ECONOMY ENGINE ---
-
 type Economy struct {
 	db           *surrealdb.DB
 	balances     map[User]Currency
@@ -99,23 +96,19 @@ func NewEconomy(db *surrealdb.DB) (e *Economy, err error) {
 	return
 }
 
-func unmarshal(data interface{}, v interface{}) error {
-	bytes, err := json.Marshal(data)
-	if err != nil {
-		return err
-	}
-	return json.Unmarshal(bytes, v)
-}
-
 func (e *Economy) loadFromCloud() error {
-	// FIX: Select returns a slice of the type provided in the generic
+	// Select returns *[]map[string]interface{}
 	data, err := surrealdb.Select[map[string]interface{}](context.Background(), e.db, "ledger")
 	if err != nil {
 		return err
 	}
 
-	// data is already []map[string]interface{} because of the generic above
-	for _, event := range data {
+	if data == nil {
+		return nil
+	}
+
+	// Dereference the pointer to range over the slice
+	for _, event := range *data {
 		amountRaw, _ := event["Amount"].(float64)
 		amount := Currency(amountRaw)
 
@@ -137,13 +130,10 @@ func (e *Economy) loadFromCloud() error {
 }
 
 // --- CORE METHODS ---
-
 func (e *Economy) Transact(sent SentTx) error {
 	if err := e.validateTx(sent); err != nil { return err }
 	tx := Tx{sent, uint64(time.Now().UnixMilli()), ""}
-	
 	if _, err := surrealdb.Create[Tx](context.Background(), e.db, "ledger", tx); err != nil { return err }
-
 	e.loadTx(tx)
 	return nil
 }
@@ -151,9 +141,7 @@ func (e *Economy) Transact(sent SentTx) error {
 func (e *Economy) Mint(sent SentMint) error {
 	if err := e.validateMint(sent); err != nil { return err }
 	mint := Mint{sent, uint64(time.Now().UnixMilli()), ""}
-
 	if _, err := surrealdb.Create[Mint](context.Background(), e.db, "ledger", mint); err != nil { return err }
-
 	e.loadMint(mint)
 	return nil
 }
@@ -161,15 +149,12 @@ func (e *Economy) Mint(sent SentMint) error {
 func (e *Economy) Burn(sent SentBurn) error {
 	if err := e.validateBurn(sent); err != nil { return err }
 	burn := Burn{sent, uint64(time.Now().UnixMilli()), ""}
-
 	if _, err := surrealdb.Create[Burn](context.Background(), e.db, "ledger", burn); err != nil { return err }
-
 	e.loadBurn(burn)
 	return nil
 }
 
 // --- VALIDATION & HELPERS ---
-
 func (e *Economy) validateTx(sent SentTx) error {
 	if sent.Amount == 0 { return errors.New("must have amount") }
 	if sent.From == "" || sent.To == "" { return errors.New("missing sender or receiver") }
@@ -212,14 +197,13 @@ func (e *Economy) Stipend(to User) error {
 }
 
 func (e *Economy) LastNTransactions(validate func(tx map[string]any) bool, n int) ([]map[string]any, error) {
-	// FIX: Query returns a slice of Results. We need to unmarshal the result set correctly.
+	// Query returns *[]QueryResult[[]map[string]any]
 	raw, err := surrealdb.Query[[]map[string]any](context.Background(), e.db, "SELECT * FROM ledger ORDER BY Time DESC LIMIT $n", map[string]interface{}{"n": n})
 	if err != nil { return nil, err }
 	
-	// Query returns a slice where each element is the result of one statement.
-	// Since we only have one statement, we take the first element.
-	if len(raw) > 0 {
-		return raw[0], nil
+	// Dereference the pointer, check length, and return the .Result of the first query
+	if raw != nil && len(*raw) > 0 {
+		return (*raw)[0].Result, nil
 	}
 	
 	return []map[string]any{}, nil
