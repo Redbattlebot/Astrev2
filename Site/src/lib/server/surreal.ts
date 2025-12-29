@@ -8,7 +8,8 @@ import { building } from "$app/environment"
 import initQuery from "$lib/server/init.surql"
 import logo from "$lib/server/logo"
 
-// 1. Export the DB instance so other files can find it
+// --- 1. DATABASE INITIALIZATION ---
+// Exported so other files can import { db }
 export const db = new Surreal()
 
 const ogq = db.query.bind(db)
@@ -29,52 +30,68 @@ db.query = async <T extends unknown[]>(
 
 export const version = db.version.bind(db)
 
+// --- 2. AUTHENTICATION LOGIC ---
 async function reconnect() {
 	for (let attempt = 1; ; attempt++) {
 		try {
 			await db.close() 
 			console.log(`🚀 Attempt ${attempt}: Connecting to SurrealDB Cloud...`)
 			
-			// STAGE 1: Establish the Socket Connection
+			// Stage A: Establish Socket
 			await db.connect("wss://rosilo-06dmf6lsidp67225aee6c67su4.aws-usw2.surreal.cloud/rpc")
 			
-			// STAGE 2: Sign in with your Owner account
-			// Using signin() is often more successful than putting auth in connect()
+			// Stage B: Sign in with ROOT access
+			// This 'access' key is the fix for the "IAM: Not enough permissions" error
 			await db.signin({
 				user: "rosilo_admin",
-				pass: "YOUR_ACTUAL_PASSWORD_HERE", // Replace with your password
+				pass: "YOUR_PASSWORD_HERE", // <-- Put your actual password here
+				access: "root"
 			})
 
-			// STAGE 3: Select the Namespace and Database
+			// Stage C: Select Context
 			await db.use({ ns: "Rosilo", db: "rosilo" })
 			
-			console.log("✅ AUTH SUCCESS! Connected to Rosilo/rosilo as rosilo_admin")
+			console.log("✅ AUTH SUCCESS! Connected to Rosilo/rosilo as Owner.")
 			console.log("DB Version:", await version())
 			break
 		} catch (err) {
 			const e = err as Error
 			console.error(`❌ Connection failed: ${e.message}`)
 			
-			if (attempt >= 5) {
-				console.error("MAX ATTEMPTS REACHED. Please check if rosilo_admin exists in Cloud Console.")
+			// Fallback: If 'user' key fails, try 'username' key
+			if (e.message.includes("username is missing")) {
+				try {
+					await db.signin({
+						username: "rosilo_admin",
+						password: "YOUR_PASSWORD_HERE"
+					} as any)
+					await db.use({ ns: "Rosilo", db: "rosilo" })
+					console.log("✅ AUTH SUCCESS (via username fallback)")
+					break
+				} catch (inner) {
+					console.error("❌ Fallback auth also failed.")
+				}
+			}
+
+			if (attempt >= 3) {
+				console.error("Giving up after 3 attempts. Please verify rosilo_admin is a ROOT owner.")
 				break
 			}
-			
 			await new Promise(resolve => setTimeout(resolve, 2000))
 		}
 	}
 }
 
-// Only start the connection if we aren't currently building the project
+// Only run connection logic if we aren't in the middle of a 'build'
 if (!building) {
 	await reconnect()
+	// Runs your initial table/schema setup
 	await db.query(initQuery)
 	logo()
 }
 
-// --- HELPER TYPES & FUNCTIONS ---
-// These ensure the rest of your app (API routes) doesn't break during build
-
+// --- 3. TYPE DEFINITIONS & HELPERS ---
+// Kept so your API routes ($lib/server/surreal) find their exports
 type RecordIdTypes = {
 	asset: number; auditLog: string; banner: string; comment: string;
 	created: string; createdAsset: string; dislikes: string; follows: string;
