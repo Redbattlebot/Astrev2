@@ -1,5 +1,5 @@
 {
-	"name": "mercurycore",
+	"name": "Rosilo",
 	"scripts": {
 		"dev": "bun x -b vite dev",
 		"build": "bun x -b vite build",
