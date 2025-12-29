@@ -60,11 +60,17 @@ async function reconnect() {
     }
 }
 
-// Only run the connection if the app is starting up (not during build)
+// --- Authentication Execution ---
 if (!building) {
-	await reconnect()
-	await db.query(initQuery)
-	logo()
+    // 1. Wait for the connection AND the NS/DB selection to finish
+    await reconnect(); 
+
+    // 2. Now that we are 100% sure we are in the 'Rosilo' namespace, run the schema
+    console.log("🛠️ Running initial schema query...");
+    await db.query(initQuery);
+
+    // 3. Success!
+    logo();
 }
 
 // --- 3. HELPER TYPES & FUNCTIONS ---
