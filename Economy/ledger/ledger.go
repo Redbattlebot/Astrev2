@@ -48,7 +48,7 @@ type SentTx struct {
 type Tx struct {
 	SentTx
 	Time uint64
-	Id   string
+	Id   string `json:"id,omitempty"`
 }
 
 type SentMint struct {
@@ -59,7 +59,7 @@ type SentMint struct {
 type Mint struct {
 	SentMint
 	Time uint64
-	Id   string
+	Id   string `json:"id,omitempty"`
 }
 
 type SentBurn struct {
@@ -71,7 +71,7 @@ type SentBurn struct {
 type Burn struct {
 	SentBurn
 	Time uint64
-	Id   string
+	Id   string `json:"id,omitempty"`
 }
 
 // --- ECONOMY ENGINE ---
@@ -98,46 +98,41 @@ func NewEconomy(db *surrealdb.DB) (e *Economy, err error) {
 	return
 }
 
-// Helper to handle SurrealDB data conversion
 func unmarshal(data interface{}, v interface{}) error {
-	// Convert the raw map/interface response to JSON bytes
 	bytes, err := json.Marshal(data)
 	if err != nil {
 		return err
 	}
-	// Convert JSON bytes back into our Go struct
 	return json.Unmarshal(bytes, v)
 }
 
 func (e *Economy) loadFromCloud() error {
-	// Use Select to get raw data
-	data, err := e.db.Select("ledger")
+	// NEW SYNTAX: Use surrealdb.Select(e.db, "ledger")
+	data, err := surrealdb.Select[map[string]interface{}](e.db, "ledger")
 	if err != nil {
 		return err
 	}
 
 	var events []map[string]interface{}
-	// FIX: Use our custom unmarshal helper instead of the missing library function
 	if err := unmarshal(data, &events); err != nil {
 		return err
 	}
 
 	for _, event := range events {
-		amount := Currency(event["Amount"].(float64))
+		amountRaw, _ := event["Amount"].(float64)
+		amount := Currency(amountRaw)
 
 		if to, ok := event["To"].(string); ok && event["From"] != nil {
-			// Transaction
 			from := event["From"].(string)
 			e.balances[User(from)] -= amount
 			e.balances[User(to)] += amount
 		} else if to, ok := event["To"].(string); ok {
-			// Mint
 			e.balances[User(to)] += amount
 			if event["Note"] == "Stipend" {
-				e.prevStipends[User(to)] = uint64(event["Time"].(float64))
+				timeRaw, _ := event["Time"].(float64)
+				e.prevStipends[User(to)] = uint64(timeRaw)
 			}
 		} else if from, ok := event["From"].(string); ok {
-			// Burn
 			e.balances[User(from)] -= amount
 		}
 	}
@@ -147,42 +142,31 @@ func (e *Economy) loadFromCloud() error {
 // --- CORE METHODS ---
 
 func (e *Economy) Transact(sent SentTx) error {
-	if err := e.validateTx(sent); err != nil {
-		return err
-	}
-
-	tx := Tx{sent, uint64(time.Now().UnixMilli()), RandId()}
-	if _, err := e.db.Create("ledger", tx); err != nil {
-		return err
-	}
+	if err := e.validateTx(sent); err != nil { return err }
+	tx := Tx{sent, uint64(time.Now().UnixMilli()), ""}
+	
+	// NEW SYNTAX: Use surrealdb.Create
+	if _, err := surrealdb.Create[Tx](e.db, "ledger", tx); err != nil { return err }
 
 	e.loadTx(tx)
 	return nil
 }
 
 func (e *Economy) Mint(sent SentMint) error {
-	if err := e.validateMint(sent); err != nil {
-		return err
-	}
+	if err := e.validateMint(sent); err != nil { return err }
+	mint := Mint{sent, uint64(time.Now().UnixMilli()), ""}
 
-	mint := Mint{sent, uint64(time.Now().UnixMilli()), RandId()}
-	if _, err := e.db.Create("ledger", mint); err != nil {
-		return err
-	}
+	if _, err := surrealdb.Create[Mint](e.db, "ledger", mint); err != nil { return err }
 
 	e.loadMint(mint)
 	return nil
 }
 
 func (e *Economy) Burn(sent SentBurn) error {
-	if err := e.validateBurn(sent); err != nil {
-		return err
-	}
+	if err := e.validateBurn(sent); err != nil { return err }
+	burn := Burn{sent, uint64(time.Now().UnixMilli()), ""}
 
-	burn := Burn{sent, uint64(time.Now().UnixMilli()), RandId()}
-	if _, err := e.db.Create("ledger", burn); err != nil {
-		return err
-	}
+	if _, err := surrealdb.Create[Burn](e.db, "ledger", burn); err != nil { return err }
 
 	e.loadBurn(burn)
 	return nil
@@ -191,12 +175,8 @@ func (e *Economy) Burn(sent SentBurn) error {
 // --- VALIDATION & HELPERS ---
 
 func (e *Economy) validateTx(sent SentTx) error {
-	if sent.Amount == 0 {
-		return errors.New("must have amount")
-	}
-	if sent.From == "" || sent.To == "" {
-		return errors.New("missing sender or receiver")
-	}
+	if sent.Amount == 0 { return errors.New("must have amount") }
+	if sent.From == "" || sent.To == "" { return errors.New("missing sender or receiver") }
 	if total := sent.Amount; total > e.balances[sent.From] {
 		return fmt.Errorf("insufficient balance: %s required", total.Readable())
 	}
@@ -204,19 +184,13 @@ func (e *Economy) validateTx(sent SentTx) error {
 }
 
 func (e *Economy) validateMint(sent SentMint) error {
-	if sent.Amount == 0 {
-		return errors.New("mint must have amount")
-	}
+	if sent.Amount == 0 { return errors.New("mint must have amount") }
 	return nil
 }
 
 func (e *Economy) validateBurn(sent SentBurn) error {
-	if sent.Amount == 0 {
-		return errors.New("burn must have amount")
-	}
-	if sent.Amount > e.balances[sent.From] {
-		return errors.New("insufficient balance to burn")
-	}
+	if sent.Amount == 0 { return errors.New("burn must have amount") }
+	if sent.Amount > e.balances[sent.From] { return errors.New("insufficient balance to burn") }
 	return nil
 }
 
@@ -227,36 +201,26 @@ func (e *Economy) loadTx(tx Tx) {
 
 func (e *Economy) loadMint(mint Mint) {
 	e.balances[mint.To] += mint.Amount
-	if mint.Note == "Stipend" {
-		e.prevStipends[mint.To] = mint.Time
-	}
+	if mint.Note == "Stipend" { e.prevStipends[mint.To] = mint.Time }
 }
 
 func (e *Economy) loadBurn(burn Burn) {
 	e.balances[burn.From] -= burn.Amount
 }
 
-func (e *Economy) GetBalance(u User) Currency    { return e.balances[u] }
-func (e *Economy) GetInventory(u User) Assets    { return e.inventories[u] }
-func (e *Economy) GetPrevStipend(u User) uint64  { return e.prevStipends[u] }
+func (e *Economy) GetBalance(u User) Currency { return e.balances[u] }
+func (e *Economy) GetInventory(u User) Assets { return e.inventories[u] }
+func (e *Economy) GetPrevStipend(u User) uint64 { return e.prevStipends[u] }
 func (e *Economy) Stipend(to User) error {
 	return e.Mint(SentMint{to, Currency(Stipend), "Stipend"})
 }
 
 func (e *Economy) LastNTransactions(validate func(tx map[string]any) bool, n int) ([]map[string]any, error) {
-	// Use Query and standard unmarshal
-	data, err := e.db.Query("SELECT * FROM ledger ORDER BY Time DESC LIMIT $n", map[string]interface{}{"n": n})
-	if err != nil {
-		return nil, err
-	}
-
+	// NEW SYNTAX: Use surrealdb.Query
+	data, err := surrealdb.Query[[]map[string]any](e.db, "SELECT * FROM ledger ORDER BY Time DESC LIMIT $n", map[string]interface{}{"n": n})
+	if err != nil { return nil, err }
+	
 	var result []map[string]any
-	// The query returns an array of results, we typically want the first one's content
-	if err := unmarshal(data, &result); err != nil {
-		return nil, err
-	}
-	// Depending on driver structure, 'result' might be wrapped.
-	// For v1.0, Query often returns []interface{}.
-	// We return generic map for safety here.
+	if err := unmarshal(data, &result); err != nil { return nil, err }
 	return result, nil
 }
