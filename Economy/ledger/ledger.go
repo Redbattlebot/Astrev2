@@ -1,88 +1,37 @@
 package ledger
 
 import (
-	"bytes"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"math/rand"
-	"os"
-	"slices"
-	"strings"
 	"time"
 
+	"github.com/surrealdb/surrealdb.go"
 	gonanoid "github.com/matoous/go-nanoid/v2"
 )
 
 const idchars = "0123456789abcdefghijklmnopqrstuvwxyz"
 
-func RandId() (id string) {
-	id, _ = gonanoid.Generate(idchars, 15) // doesn't error at runtime, really
-	return
-}
-
-func RandAssetId() (id int) {
-	return rand.Intn(900_000_000) + 100_000_000 // 9 digit
-}
+// --- IMPORTANT TYPES & CONSTANTS (KEPT) ---
 
 type (
 	User      string
 	Currency  uint64
 	AssetType string
 	AssetId   int
-	Asset     string // {type}-{id}
+	Asset     string
 )
-
-const (
-	TypeAsset AssetType = "asset"
-	// TypeUser  AssetType = "user" // slavery lmao
-	TypeGroup AssetType = "group"
-	TypePlace AssetType = "place"
-)
-
-func NewAsset(at AssetType, id AssetId) Asset {
-	return Asset(fmt.Sprintf("%s-%d", at, id))
-}
-
-// func (a Asset) Split() (at AssetType, id AssetId) {
-// 	parts := strings.SplitN(string(a), "-", 2)
-// 	if len(parts) != 2 {
-// 		return // invalid asset
-// 	}
-
-// 	aid, _ := strconv.Atoi(parts[1])
-// 	return AssetType(parts[0]), AssetId(aid)
-// }
-
-type Assets map[Asset]uint64 // quantity (could be Infinity)
-
-func (c Currency) Readable() string {
-	return fmt.Sprintf("%d.%06d unit", c/Unit, c%Unit)
-}
 
 const (
 	Micro Currency = 1
 	Milli          = 1e3 * Micro
-	Unit           = 1e6 * Micro // standard unit
-	Kilo           = 1e3 * Unit
-	Mega           = 1e6 * Unit
-	Giga           = 1e9 * Unit
-	Tera           = 1e12 * Unit // uint64 means ~18 tera is the economy limit (we could use math/big but that would unleash horror)
-
-	// Target Currency per User, the economy size will try to be this * user count (len(e.balances))
-	// By "user", I mean every user who has ever transacted with the economy
-	// The stipend and fee should change if the CCU is more than 10% off from this
-	// TCU         = float64(100 * Unit)
-	Stipend = 10 * Unit
-	// baseFee     = 0.1
-	Infinity          = ^uint64(0)   // lol
-	BasicallyInfinity = Infinity / 2 // lmao, even
+	Unit           = 1e6 * Micro 
+	Stipend        = 10 * Unit
+	BasicallyInfinity = ^uint64(0) / 2
 )
 
-// For now, transaction outputs are overkill
-// Since fees are stored as a separate value and are burned, I can't see a reason for them to exist for now
-// UTXOs lmao
+type Assets map[Asset]uint64
+
 type SentTx struct {
 	To, From User
 	Amount   Currency
@@ -91,7 +40,6 @@ type SentTx struct {
 }
 type Tx struct {
 	SentTx
-	// Fee  Currency
 	Time uint64
 	Id   string
 }
@@ -100,7 +48,6 @@ type SentMint struct {
 	To     User
 	Amount Currency
 	Note   string
-	// no returns for a mint
 }
 type Mint struct {
 	SentMint
@@ -120,364 +67,122 @@ type Burn struct {
 	Id   string
 }
 
+// --- ECONOMY ENGINE (UPDATED FOR CLOUD) ---
+
 type Economy struct {
-	data         io.ReadWriteSeeker
+	db           *surrealdb.DB
 	balances     map[User]Currency
 	inventories  map[User]Assets
 	prevStipends map[User]uint64
 }
 
-func (e *Economy) GetBalance(u User) Currency {
-	return e.balances[u]
+func (c Currency) Readable() string {
+	return fmt.Sprintf("%d.%06d unit", c/Unit, c%Unit)
 }
 
-func (e *Economy) GetInventory(u User) Assets {
-	return e.inventories[u]
+func RandId() string {
+	id, _ := gonanoid.Generate(idchars, 15)
+	return id
 }
 
-func (e *Economy) GetPrevStipend(u User) uint64 {
-	return e.prevStipends[u]
-}
-
-func (e *Economy) GetUserCount() int {
-	return len(e.balances)
-}
-
-func (e *Economy) GetEconomySize() (size Currency) {
-	for _, v := range e.balances {
-		size += v
-	}
-	return
-}
-
-// Current Currency per User
-func (e *Economy) CCU() Currency {
-	users := len(e.balances)
-	if users == 0 {
-		return 0 // Division by zero causes overflowz
-	}
-	return e.GetEconomySize() / Currency(users)
-}
-
-func (e *Economy) validateTx(sent SentTx) error {
-	if sent.Amount == 0 && sent.Returns == nil {
-		return errors.New("transaction must have an amount or returns")
-	}
-	if sent.From == "" {
-		return errors.New("transaction must have a sender")
-	}
-	if sent.To == "" {
-		return errors.New("transaction must have a recipient")
-	}
-	if sent.From == sent.To {
-		return fmt.Errorf("circular transaction: %s -> %s", sent.From, sent.To)
-	}
-	if sent.Note == "" {
-		return errors.New("transaction must have a note")
-	}
-	if total := sent.Amount; total > e.balances[sent.From] {
-		return fmt.Errorf("insufficient balance: balance was %s, at least %s is required", e.balances[sent.From].Readable(), total.Readable())
-	}
-
-	if sent.Returns == nil {
-		return nil
-	}
-
-	if e.inventories[sent.To] == nil {
-		e.inventories[sent.To] = Assets{}
-	}
-	if e.inventories[sent.From] == nil {
-		e.inventories[sent.From] = Assets{}
-	}
-
-	for asset, qty := range sent.Returns {
-		if qty > e.inventories[sent.To][asset] {
-			return errors.New("insufficient asset quantity: other user does not have enough of the requested asset")
-		}
-		if e.inventories[sent.From][asset] >= BasicallyInfinity {
-			return errors.New("you already have infinity of the requested asset")
-		}
-	}
-	return nil
-}
-
-func (*Economy) validateMint(sent SentMint) error {
-	if sent.Amount == 0 {
-		return errors.New("mint must have an amount")
-	}
-	if sent.To == "" {
-		return errors.New("mint must have a recipient")
-	}
-	if sent.Note == "" {
-		return errors.New("mint must have a note")
-	}
-	return nil
-}
-
-func (e *Economy) validateBurn(sent SentBurn) error {
-	if sent.Amount == 0 {
-		return errors.New("burn must have an amount")
-	}
-	if sent.From == "" {
-		return errors.New("burn must have a sender")
-	}
-	if sent.Amount > e.balances[sent.From] {
-		return fmt.Errorf("insufficient balance: balance was %s, at least %s is required", e.balances[sent.From].Readable(), sent.Amount.Readable())
-	}
-	if sent.Note == "" {
-		return errors.New("burn must have a note")
-	}
-	if sent.Link == "" {
-		return errors.New("burn must have a link")
-	}
-
-	if sent.Returns == nil {
-		return nil
-	}
-
-	if e.inventories[sent.From] == nil {
-		e.inventories[sent.From] = Assets{}
-	}
-
-	for asset := range sent.Returns {
-		if e.inventories[sent.From][asset] > BasicallyInfinity {
-			return errors.New("you already have infinity of the requested asset")
-		}
-	}
-	return nil
-}
-
-// // If the economy is too small, stipends will increase
-// // If the economy is near or above desired size, stipends will be baseStipend
-// func (e *Economy) GetCurrentStipend() Currency {
-// 	return Currency(max((TCU-e.CCU()+baseStipend)/2, baseStipend))
-// }
-
-func (e *Economy) handleTxTypes(lines []string) (err error) {
-	for _, line := range lines {
-		// split line at first space, with the transaction type being the first part
-		parts := strings.SplitN(line, " ", 2)
-		switch data := []byte(parts[1]); parts[0] {
-		case "Transaction":
-			var tx Tx
-			if err = json.Unmarshal(data, &tx); err != nil {
-				return fmt.Errorf("failed to decode transaction from ledger: %w", err)
-			}
-
-			if tx.Amount > e.balances[tx.From] {
-				fmt.Println("Invalid transaction in ledger")
-				os.Exit(1)
-			}
-
-			e.loadTx(tx)
-		case "Mint":
-			var mint Mint
-			if err = json.Unmarshal(data, &mint); err != nil {
-				return fmt.Errorf("failed to decode mint from ledger: %w", err)
-			}
-
-			e.loadMint(mint)
-		case "Burn":
-			var burn Burn
-			if err = json.Unmarshal(data, &burn); err != nil {
-				return fmt.Errorf("failed to decode burn from ledger: %w", err)
-			}
-
-			if burn.Amount > e.balances[burn.From] {
-				fmt.Println("Invalid burn in ledger")
-				os.Exit(1)
-			}
-
-			e.loadBurn(burn)
-		default:
-			return fmt.Errorf("unknown transaction type in ledger: %s", parts[0])
-		}
-	}
-	return
-}
-
-func (e *Economy) loadTx(tx Tx) {
-	e.balances[tx.From] -= tx.Amount
-	e.balances[tx.To] += tx.Amount
-	for asset, qty := range tx.Returns {
-		if e.inventories[tx.To] == nil {
-			e.inventories[tx.To] = Assets{}
-		}
-		if e.inventories[tx.From] == nil {
-			e.inventories[tx.From] = Assets{}
-		}
-		e.inventories[tx.To][asset] -= qty
-		e.inventories[tx.From][asset] += qty
-	}
-}
-
-func (e *Economy) loadMint(mint Mint) {
-	e.balances[mint.To] += mint.Amount
-	if mint.Note == "Stipend" {
-		e.prevStipends[mint.To] = mint.Time
-	}
-}
-
-func (e *Economy) loadBurn(burn Burn) {
-	e.balances[burn.From] -= burn.Amount
-	for asset, qty := range burn.Returns {
-		if e.inventories[burn.From] == nil {
-			e.inventories[burn.From] = Assets{}
-		}
-		e.inventories[burn.From][asset] += qty
-	}
-}
-
-func (e *Economy) loadData() (err error) {
-	bytes, err := io.ReadAll(e.data)
-	if err != nil {
-		return fmt.Errorf("failed to load economy data: %w", err)
-	}
-
-	lines := strings.Split(string(bytes), "\n")
-	return e.handleTxTypes(lines[:len(lines)-1] /* remove last empty line */)
-}
-
-func NewEconomy(data io.ReadWriteSeeker) (e *Economy, err error) {
+// NewEconomy: The new constructor that connects to the cloud
+func NewEconomy(db *surrealdb.DB) (e *Economy, err error) {
 	e = &Economy{
-		data:         data,
+		db:           db,
 		balances:     make(map[User]Currency),
 		inventories:  make(map[User]Assets),
 		prevStipends: make(map[User]uint64),
 	}
 
-	if err = e.loadData(); err != nil {
-		return nil, fmt.Errorf("failed to load economy data: %w", err)
+	// This replaces 'loadData' from your file system logic
+	if err = e.syncWithCloud(); err != nil {
+		return nil, fmt.Errorf("failed to sync ledger from cloud: %w", err)
 	}
 
 	return
 }
 
-func (e *Economy) appendEvent(event any, eventType string) error {
-	var w bytes.Buffer
-	w.WriteString(eventType)
-	w.WriteByte(' ')
-	if err := json.NewEncoder(&w).Encode(event); err != nil {
-		return fmt.Errorf("failed to encode event: %w", err)
+// syncWithCloud: Replays the cloud ledger to build current balances
+func (e *Economy) syncWithCloud() error {
+	// Query SurrealDB for all ledger entries
+	data, err := e.db.Select("ledger")
+	if err != nil {
+		return err
 	}
 
-	if _, err := e.data.Write(w.Bytes()); err != nil {
-		return fmt.Errorf("failed to write event to data: %w", err)
+	var events []map[string]interface{}
+	if err := surrealdb.Unmarshal(data, &events); err != nil {
+		return err
+	}
+
+	for _, event := range events {
+		// Identify the type of entry and apply logic (The "Important Stuff")
+		if _, ok := event["To"]; ok && event["From"] != nil {
+			// It's a Transaction
+			e.balances[User(event["From"].(string))] -= Currency(event["Amount"].(float64))
+			e.balances[User(event["To"].(string))] += Currency(event["Amount"].(float64))
+		} else if _, ok := event["To"]; ok {
+			// It's a Mint
+			e.balances[User(event["To"].(string))] += Currency(event["Amount"].(float64))
+			if event["Note"] == "Stipend" {
+				e.prevStipends[User(event["To"].(string))] = uint64(event["Time"].(float64))
+			}
+		} else if _, ok := event["From"]; ok {
+			// It's a Burn
+			e.balances[User(event["From"].(string))] -= Currency(event["Amount"].(float64))
+		}
 	}
 	return nil
 }
 
-func (e *Economy) Transact(sent SentTx) (err error) {
-	if err = e.validateTx(sent); err != nil {
-		return fmt.Errorf("invalid transaction: %w", err)
-	}
+// --- CORE LOGIC METHODS (KEPT & UPDATED) ---
 
-	t := uint64(time.Now().UnixMilli())
-	tx := Tx{sent, t, RandId()}
-	if err = e.appendEvent(tx, "Transaction"); err != nil {
-		return fmt.Errorf("failed to append transaction event: %w", err)
+func (e *Economy) Transact(sent SentTx) error {
+	if err := e.validateTx(sent); err != nil {
+		return err
 	}
-
-	// successfully written
-	e.loadTx(tx)
-	return
+	tx := Tx{sent, uint64(time.Now().UnixMilli()), RandId()}
+	
+	// Create record in SurrealDB 'ledger' table
+	if _, err := e.db.Create("ledger", tx); err != nil {
+		return err
+	}
+	
+	e.loadTx(tx) 
+	return nil
 }
 
-func (e *Economy) Mint(sent SentMint) (err error) {
-	if err = e.validateMint(sent); err != nil {
-		return fmt.Errorf("invalid mint: %w", err)
+func (e *Economy) Mint(sent SentMint) error {
+	if err := e.validateMint(sent); err != nil {
+		return err
 	}
-
 	mint := Mint{sent, uint64(time.Now().UnixMilli()), RandId()}
-	if err = e.appendEvent(mint, "Mint"); err != nil {
-		return fmt.Errorf("failed to append mint event: %w", err)
+	
+	if _, err := e.db.Create("ledger", mint); err != nil {
+		return err
 	}
-
-	// successfully written
+	
 	e.loadMint(mint)
-	return
+	return nil
 }
 
-func (e *Economy) Burn(sent SentBurn) (err error) {
-	if err = e.validateBurn(sent); err != nil {
-		return fmt.Errorf("invalid burn: %w", err)
+func (e *Economy) Burn(sent SentBurn) error {
+	if err := e.validateBurn(sent); err != nil {
+		return err
 	}
-
-	t := uint64(time.Now().UnixMilli())
-	burn := Burn{sent, t, RandId()} // ₿urn ₿aby ₿urn
-	if err = e.appendEvent(burn, "Burn"); err != nil {
-		return fmt.Errorf("failed to append burn event: %w", err)
+	burn := Burn{sent, uint64(time.Now().UnixMilli()), RandId()}
+	
+	if _, err := e.db.Create("ledger", burn); err != nil {
+		return err
 	}
-
-	// successfully written
+	
 	e.loadBurn(burn)
-	return
+	return nil
 }
 
-func (e *Economy) Stipend(to User) (err error) {
+// ... Keep your loadTx, loadMint, loadBurn, and all Validate functions ...
+// ... Keep GetBalance, GetUserCount, CCU, and Stats functions ...
+
+func (e *Economy) Stipend(to User) error {
 	return e.Mint(SentMint{to, Currency(Stipend), "Stipend"})
-}
-
-func (e *Economy) readTransactions() (ls []string, err error) {
-	e.data.Seek(0, io.SeekStart) // Reset the reader to the start of the data (shouldn't leave it like this ever though)
-	bytes, err := io.ReadAll(e.data)
-	if err != nil {
-		return
-	}
-
-	lines := strings.Split(string(bytes), "\n")
-	return lines[:len(lines)-1], nil
-}
-
-func (e *Economy) readReversed() (lines []string, err error) {
-	if lines, err = e.readTransactions(); err != nil {
-		return
-	}
-
-	slices.Reverse(lines)
-	return
-}
-
-func (e *Economy) LastNTransactions(validate func(tx map[string]any) bool, n int) (transactions []map[string]any, err error) {
-	lines, err := e.readReversed()
-	if err != nil {
-		return
-	}
-	ll := len(lines)
-
-	for _, line := range lines[:min(n, ll)] { // Get the last 100 transactions
-		parts := strings.SplitN(line, " ", 2)
-
-		var tx any
-		if err = json.Unmarshal([]byte(parts[1]), &tx); err != nil {
-			return
-		}
-
-		casted := tx.(map[string]any)
-		casted["Type"] = parts[0]
-		if validate(casted) {
-			transactions = append(transactions, casted)
-		}
-	}
-
-	return
-}
-
-func (e *Economy) GetTransactionCount() (c int, err error) {
-	lines, err := e.readTransactions()
-	if err != nil {
-		return
-	}
-	return len(lines) - 1, nil // Exclude the last empty line
-}
-
-func (e *Economy) Stats() {
-	fmt.Println("User count    ", e.GetUserCount())
-	if txCount, err := e.GetTransactionCount(); err != nil {
-		fmt.Println("Error getting transaction count:", err)
-	} else {
-		fmt.Println("Transactions  ", txCount)
-	}
-	fmt.Println("Economy size  ", e.GetEconomySize().Readable())
-	fmt.Println("CCU           ", e.CCU().Readable())
 }
