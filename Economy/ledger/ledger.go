@@ -96,8 +96,8 @@ func NewEconomy(db *surrealdb.DB) (e *Economy, err error) {
 }
 
 func (e *Economy) loadFromCloud() error {
-	// Select returns *[]map[string]any
-	data, err := surrealdb.Select[map[string]any](context.Background(), e.db, "ledger")
+	// 1. Select as interface{} because SurrealDB returns a slice (array)
+	data, err := surrealdb.Select[interface{}](context.Background(), e.db, "ledger")
 	if err != nil {
 		return err
 	}
@@ -106,18 +106,25 @@ func (e *Economy) loadFromCloud() error {
 		return nil
 	}
 
-	for _, rawEvent := range *data {
-		// FIX: Manually cast the 'any' type to a map so it's indexable
-		event, ok := any(rawEvent).(map[string]any)
+	// 2. The v1 driver returns a pointer to a slice: *[]interface{}
+	slicePtr, ok := data.(*[]interface{})
+	if !ok || slicePtr == nil {
+		return nil
+	}
+
+	// 3. Loop through the slice and cast each item to a map
+	for _, item := range *slicePtr {
+		event, ok := item.(map[string]interface{})
 		if !ok {
 			continue
 		}
 
+		// JSON numbers arrive as float64
 		amountRaw, _ := event["Amount"].(float64)
 		amount := Currency(amountRaw)
 
 		if to, ok := event["To"].(string); ok && event["From"] != nil {
-			from := event["From"].(string)
+			from, _ := event["From"].(string)
 			e.balances[User(from)] -= amount
 			e.balances[User(to)] += amount
 		} else if to, ok := event["To"].(string); ok {
@@ -200,13 +207,14 @@ func (e *Economy) Stipend(to User) error {
 	return e.Mint(SentMint{to, Currency(Stipend), "Stipend"})
 }
 
-func (e *Economy) LastNTransactions(validate func(tx map[string]any) bool, n int) ([]map[string]any, error) {
-	raw, err := surrealdb.Query[[]map[string]any](context.Background(), e.db, "SELECT * FROM ledger ORDER BY Time DESC LIMIT $n", map[string]any{"n": n})
+func (e *Economy) LastNTransactions(validate func(tx map[string]interface{}) bool, n int) ([]map[string]interface{}, error) {
+	// Query returns *[]QueryResult[[]map[string]interface{}]
+	raw, err := surrealdb.Query[[]map[string]interface{}](context.Background(), e.db, "SELECT * FROM ledger ORDER BY Time DESC LIMIT $n", map[string]interface{}{"n": n})
 	if err != nil { return nil, err }
 	
 	if raw != nil && len(*raw) > 0 {
 		return (*raw)[0].Result, nil
 	}
 	
-	return []map[string]any{}, nil
+	return []map[string]interface{}{}, nil
 }
