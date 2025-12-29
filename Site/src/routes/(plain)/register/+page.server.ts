@@ -70,15 +70,16 @@ actions.register = async ({ fetch: f, cookies, request }) => {
 		if (!matched) return formError(form, ["regkey"], ["Registration key is invalid"])
 
 		key = Record("regKey", matched[1])
-		const results = await db.query<any[][]>(regkeyCheckQuery, { key })
-		const regkeyCheck = results[0]?.[0]
+		const results = await db.query<any[]>(regkeyCheckQuery, { key })
+		// Find the result that contains the regKey data
+		const regkeyCheck = results.find(r => r && r.usesLeft !== undefined)
 
 		if (!regkeyCheck) return formError(form, ["regkey"], ["Registration key is invalid"])
 		if (regkeyCheck.usesLeft < 1) return formError(form, ["regkey"], ["This registration key has ran out of uses"])
 	}
 
 	// EXECUTE CREATION
-	const results = await db.query<any[][]>(createUserQuery, {
+	const results = await db.query<any[]>(createUserQuery, {
 		admin: false,
 		username,
 		email: email || "",
@@ -88,18 +89,20 @@ actions.register = async ({ fetch: f, cookies, request }) => {
 		key,
 	})
 
-	// Safely grab user from the results matrix
-	const user = results[0]?.[0] || results[1]?.[0]
-	if (!user) return formError(form, ["username"], ["Database failed to create user record."])
+	// FIXED: Dynamically find the user object in the results array
+	const user = results.find(r => r && (r.id || (Array.isArray(r) && r[0]?.id)));
+	const actualUser = Array.isArray(user) ? user[0] : user;
+
+	if (!actualUser) return formError(form, ["username"], ["Database failed to create user record."])
 
 	try {
-		const userId = user.id ? user.id.toString() : user.toString()
+		const userId = actualUser.id ? actualUser.id.toString() : actualUser.toString()
 		await requestRender(f, "Avatar", userId, username)
 	} catch (e) {
 		console.warn("Avatar render failed, but user was created.")
 	}
 
-	cookies.set(cookieName, await createSession(user), cookieOptions)
+	cookies.set(cookieName, await createSession(actualUser), cookieOptions)
 	redirect(302, "/home")
 }
 
@@ -118,7 +121,7 @@ actions.initialAccount = async ({ fetch: f, cookies, request }) => {
 		return formError(form, ["username"], ["There's already an account registered"])
 
 	// EXECUTE CREATION
-	const results = await db.query<any[][]>(createUserQuery, {
+	const results = await db.query<any[]>(createUserQuery, {
 		admin: true,
 		username,
 		email: "",
@@ -127,23 +130,25 @@ actions.initialAccount = async ({ fetch: f, cookies, request }) => {
 		bodyColours: config.DefaultBodyColors,
 	})
 
-	// Matrix destructuring: get the first row of the first or second statement
-	const user = results[0]?.[0] || results[1]?.[0]
+	// FIXED: Dynamically find the user object in the results array
+	// Based on your logs, it was at index [2], but this find() covers all bases
+	const user = results.find(r => r && (r.id || (Array.isArray(r) && r[0]?.id)));
+	const actualUser = Array.isArray(user) ? user[0] : user;
 
-	if (!user) {
+	if (!actualUser) {
 		console.error("Initial account creation failed. Results:", results)
 		return formError(form, ["username"], ["Database error: User not returned after creation."])
 	}
 
 	try {
-		const userId = user.id ? user.id.toString() : user.toString()
+		const userId = actualUser.id ? actualUser.id.toString() : actualUser.toString()
 		await requestRender(f, "Avatar", userId, username)
 	} catch (e) {
 		console.warn("Avatar render failed.")
 	}
 
 	// Create session and set cookie
-	const sessionToken = await createSession(user)
+	const sessionToken = await createSession(actualUser)
 	cookies.set(cookieName, sessionToken, cookieOptions)
 
 	redirect(302, "/home")
