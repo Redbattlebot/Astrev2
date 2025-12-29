@@ -1,7 +1,7 @@
 package main
 
 import (
-	"context" // Added
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -24,7 +24,7 @@ func toReadable(cur Currency) string {
 	return fmt.Sprintf("%d.%06d unit", cur/Unit, cur%Unit)
 }
 
-// --- ALL YOUR IMPORTANT ROUTES (KEPT) ---
+// --- ROUTES ---
 
 func (e *EconomyServer) currentStipendRoute(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprint(w, Stipend)
@@ -51,7 +51,9 @@ func (e *EconomyServer) adminTransactionsRoute(w http.ResponseWriter, r *http.Re
 func (e *EconomyServer) transactionsRoute(w http.ResponseWriter, r *http.Request) {
 	id := User(r.PathValue("id"))
 	transactions, err := e.LastNTransactions(func(tx map[string]any) bool {
-		return tx["From"] != nil && User(tx["From"].(string)) == id || tx["To"] != nil && User(tx["To"].(string)) == id
+		from, fOk := tx["From"].(string)
+		to, tOk := tx["To"].(string)
+		return (fOk && User(from) == id) || (tOk && User(to) == id)
 	}, 100)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -121,7 +123,8 @@ func main() {
 
 	dbURL := os.Getenv("DB_URL")
 	if dbURL == "" {
-		dbURL = "https://rosilo-06dmf6lsidp67225aee6c67su4.aws-usw2.surreal.cloud/rpc"
+		// Default to WSS for Cloud stability
+		dbURL = "wss://rosilo-06dmf6lsidp67225aee6c67su4.aws-usw2.surreal.cloud/rpc"
 	}
 
 	db, err := surrealdb.New(dbURL)
@@ -130,38 +133,50 @@ func main() {
 		os.Exit(1)
 	}
 
-	// FIX 1: Use SignIn (capitalized) and context.Background()
-	_, err = db.SignIn(context.Background(), map[string]interface{}{
+	// Create a background context for the connection lifecycle
+	ctx := context.Background()
+
+	// Scoped SignIn: This explicitly tells SurrealDB which NS/DB the user belongs to.
+	_, err = db.SignIn(ctx, map[string]interface{}{
 		"user": os.Getenv("SURREAL_USER"),
 		"pass": os.Getenv("SURREAL_PASS"),
+		"ns":   os.Getenv("SURREAL_NS"),
+		"db":   os.Getenv("SURREAL_DB"),
 	})
 	if err != nil {
 		fmt.Printf(c.InRed("❌ Login failed: %v\n"), err)
+		// Debug info to help you verify what's being sent
+		fmt.Printf("Attempted login with User: %s, NS: %s, DB: %s\n", 
+			os.Getenv("SURREAL_USER"), os.Getenv("SURREAL_NS"), os.Getenv("SURREAL_DB"))
 		os.Exit(1)
 	}
 
-	// FIX 2: Use context.Background() and capture only 1 return value (error)
-	if err = db.Use(context.Background(), os.Getenv("SURREAL_NS"), os.Getenv("SURREAL_DB")); err != nil {
+	if err = db.Use(ctx, os.Getenv("SURREAL_NS"), os.Getenv("SURREAL_DB")); err != nil {
 		fmt.Printf(c.InRed("❌ Namespace/DB error: %v\n"), err)
 		os.Exit(1)
 	}
 
-	e, err := NewEconomy(db) 
+	e, err := NewEconomy(db)
 	if err != nil {
 		fmt.Printf(c.InRed("❌ Economy Init failed: %v\n"), err)
 		os.Exit(1)
 	}
 
 	es := EconomyServer{Economy: e}
-	http.HandleFunc("GET /currentStipend", es.currentStipendRoute)
-	http.HandleFunc("GET /balance/{id}", es.balanceRoute)
-	http.HandleFunc("GET /transactions", es.adminTransactionsRoute)
-	http.HandleFunc("GET /transactions/{id}", es.transactionsRoute)
-	http.HandleFunc("POST /transact", es.transactRoute)
-	http.HandleFunc("POST /mint", es.mintRoute)
-	http.HandleFunc("POST /burn", es.burnRoute)
-	http.HandleFunc("POST /stipend/{id}", es.stipendRoute)
+	
+	// Server Mux
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /currentStipend", es.currentStipendRoute)
+	mux.HandleFunc("GET /balance/{id}", es.balanceRoute)
+	mux.HandleFunc("GET /transactions", es.adminTransactionsRoute)
+	mux.HandleFunc("GET /transactions/{id}", es.transactionsRoute)
+	mux.HandleFunc("POST /transact", es.transactRoute)
+	mux.HandleFunc("POST /mint", es.mintRoute)
+	mux.HandleFunc("POST /burn", es.burnRoute)
+	mux.HandleFunc("POST /stipend/{id}", es.stipendRoute)
 
 	fmt.Println(c.InGreen("~ Economy service is up on port 2009 ~"))
-	http.ListenAndServe(":2009", nil)
+	if err := http.ListenAndServe(":2009", mux); err != nil {
+		fmt.Printf(c.InRed("❌ Server failed: %v\n"), err)
+	}
 }
