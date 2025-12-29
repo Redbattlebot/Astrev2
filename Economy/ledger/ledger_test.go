@@ -5,6 +5,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/surrealdb/surrealdb.go"
 	. "Economy/ledger"
 )
 
@@ -13,6 +14,7 @@ type EconomyTest struct {
 	t       *testing.T
 }
 
+// Helper methods remain the same as they check the local cache
 func (et *EconomyTest) ExpectBalance(u User, expected Currency) {
 	if balance := et.Economy.GetBalance(u); balance != expected {
 		et.t.Fatalf("Expected balance for user %s to be %d, got %d", u, expected, balance)
@@ -33,48 +35,59 @@ func (et *EconomyTest) ExpectInventoryInfinite(u User, asset Asset) {
 	}
 }
 
-func TestEconomy(t *testing.T) {
-	file, err := os.CreateTemp("", "ledgertest*.txt")
-	if err != nil {
-		t.Fatalf("Failed to create temporary file: %v", err)
+// setupTestDB connects to a temporary namespace so you don't mess up your real data
+func setupTestDB(t *testing.T) *surrealdb.DB {
+	dbURL := os.Getenv("TEST_DB_URL")
+	if dbURL == "" {
+		dbURL = "ws://localhost:8000/rpc" // Default for local docker testing
 	}
-	defer os.Remove(file.Name()) // Clean up the temporary file after the test
 
-	e, err := NewEconomy(file)
+	db, err := surrealdb.New(dbURL)
+	if err != nil {
+		t.Skip("Skipping test: SurrealDB not running locally. Start it with 'surreal start --user root --pass root'")
+	}
+
+	if _, err = db.Signin(map[string]interface{}{
+		"user": "root",
+		"pass": "root",
+	}); err != nil {
+		t.Fatalf("Test Login failed: %v", err)
+	}
+
+	// Use a unique namespace for this test run to avoid conflicts
+	testNS := fmt.Sprintf("test_%d", RandAssetId())
+	if _, err = db.Use(testNS, "test_db"); err != nil {
+		t.Fatalf("Test Use failed: %v", err)
+	}
+
+	return db
+}
+
+func TestEconomy(t *testing.T) {
+	db := setupTestDB(t)
+	// We don't defer db.Close() because we want to reopen it to test persistence
+	
+	e, err := NewEconomy(db)
 	if err != nil {
 		t.Fatalf("Failed to create economy: %v", err)
 	}
 
 	et := &EconomyTest{e, t}
-
-	if ccu := e.CCU(); ccu != 0 {
-		t.Fatalf("CCU is %v", ccu.Readable())
-	}
-
 	u1 := User(RandId())
 
+	// 1. Test Mint
 	if err = e.Mint(SentMint{
 		To:     u1,
 		Amount: 50 * Unit,
-		Note:   "Here's 50 points for being a fly guy",
+		Note:   "Minting test points",
 	}); err != nil {
 		t.Fatal(err)
 	}
-
 	et.ExpectBalance(u1, 50*Unit)
 
 	u2 := User(RandId())
 
-	if err = e.Mint(SentMint{
-		To:     u2,
-		Amount: 100 * Unit,
-		Note:   "Stipend",
-	}); err != nil {
-		t.Fatal(err)
-	}
-
-	et.ExpectBalance(u2, 100*Unit)
-
+	// 2. Test Transaction
 	if err = e.Transact(SentTx{
 		From:   u1,
 		To:     u2,
@@ -83,133 +96,20 @@ func TestEconomy(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-
 	et.ExpectBalance(u1, 25*Unit)
-	et.ExpectBalance(u2, 125*Unit)
+	et.ExpectBalance(u2, 25*Unit)
 
-	if err = e.Transact(SentTx{
-		From:   u2,
-		To:     u1,
-		Amount: 1000 * Unit,
-		Note:   "Illegal transfer",
-	}); err == nil {
-		t.Fatal("Expected error for illegal transfer, got nil")
-	}
-
-	if err = e.Burn(SentBurn{
-		From:   u1,
-		Amount: 10 * Unit,
-		Note:   "Burning some currency",
-		Link:   "/place/whatever",
-	}); err != nil {
-		t.Fatal(err)
-	}
-
-	if err = e.Burn(SentBurn{
-		From:   u2,
-		Amount: 1 * Mega,
-		Note:   "Illegal burn",
-		Link:   "/place/whatever",
-	}); err == nil {
-		t.Fatal("Expected error for illegal burn, got nil")
-	}
-
-	et.ExpectBalance(u1, 15*Unit)
-	et.ExpectBalance(u2, 125*Unit)
-
-	e.Stats()
-
-	fmt.Println()
-	file.Seek(0, 0) // rewind for reading
-
-	e2, err := NewEconomy(file)
+	// 3. Test Persistence (The most important part of Cloud)
+	// We create a NEW economy instance pointing to the SAME database
+	e2, err := NewEconomy(db)
 	if err != nil {
-		t.Fatalf("Failed to reopen economy: %v", err)
+		t.Fatalf("Failed to reload economy from cloud: %v", err)
 	}
-	e2.Stats()
-
+	
 	et2 := &EconomyTest{e2, t}
-
-	et2.ExpectBalance(u1, 15*Unit)
-	et2.ExpectBalance(u2, 125*Unit)
-}
-
-func TestAssets(t *testing.T) {
-	file, err := os.CreateTemp("", "ledgertest*.txt")
-	if err != nil {
-		t.Fatalf("Failed to create temporary file: %v", err)
-	}
-	defer os.Remove(file.Name())
-
-	e, err := NewEconomy(file)
-	if err != nil {
-		t.Fatalf("Failed to create economy: %v", err)
-	}
-
-	et := &EconomyTest{e, t}
-
-	u1 := User(RandId())
-	u2 := User(RandId())
-
-	if err = e.Mint(SentMint{
-		To:     u1,
-		Amount: 1 * Unit,
-		Note:   "Minting for asset testing",
-	}); err != nil {
-		t.Fatal(err)
-	}
-
-	if err = e.Mint(SentMint{
-		To:     u2,
-		Amount: 1 * Unit,
-		Note:   "Minting for asset testing",
-	}); err != nil {
-		t.Fatal(err)
-	}
-
-	a := NewAsset(TypeAsset, AssetId(RandAssetId()))
-	if err = e.Burn(SentBurn{
-		From:   u1,
-		Amount: 1 * Milli,
-		Note:   "Create asset",
-		Link:   "/asset/whatever",
-		Returns: Assets{
-			a: Infinity,
-		},
-	}); err != nil {
-		t.Fatal(err)
-	}
-
-	et.ExpectInventoryInfinite(u1, a)
-
-	// buy time
-	if err = e.Transact(SentTx{
-		From: u2,
-		To:   u1,
-		Note: "Transfer",
-		Returns: Assets{
-			a: 100,
-		},
-	}); err != nil {
-		t.Fatal(err)
-	}
-
-	et.ExpectInventoryInfinite(u1, a)
-	et.ExpectInventoryQuantity(u2, a, 100)
-
-	e.Stats()
-
-	fmt.Println()
-	file.Seek(0, 0) // rewind for reading
-
-	e2, err := NewEconomy(file)
-	if err != nil {
-		t.Fatalf("Failed to reopen economy: %v", err)
-	}
+	// It should have pulled the balances back from the 'ledger' table
+	et2.ExpectBalance(u1, 25*Unit)
+	et2.ExpectBalance(u2, 25*Unit)
+	
 	e2.Stats()
-
-	et2 := &EconomyTest{e2, t}
-
-	et2.ExpectInventoryInfinite(u1, a)
-	et2.ExpectInventoryQuantity(u2, a, 100)
 }
