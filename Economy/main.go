@@ -1,188 +1,68 @@
-// Mercury Economy service
-// "imagine a blockchain but without the blocks or the chain" - Heliodex
-
+// Mercury Economy service - Fully Cloud Version
 package main
 
 import (
-	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"os"
-	"time"
 
+	"github.com/surrealdb/surrealdb.go"
 	c "github.com/TwiN/go-color"
 
 	. "Economy/ledger"
 )
 
-const (
-	folderpath = "../data/economy" // kinda jsonl file
-	filepath   = folderpath + "/ledger"
-
-	stipendTime = 12 * 60 * 60 * 1000
-)
-
-var currentFilepath = filepath
-
-func toReadable(c Currency) string {
-	return fmt.Sprintf("%d.%06d unit", c/Unit, c%Unit)
-}
-
 type EconomyServer struct {
 	*Economy
 }
 
-// func (e *EconomyServer) currentFeeRoute(w http.ResponseWriter, r *http.Request) {
-// 	fmt.Fprint(w, e.GetCurrentFee())
-// }
-
-func (e *EconomyServer) currentStipendRoute(w http.ResponseWriter, r *http.Request) {
-	fmt.Fprint(w, Stipend)
-}
-
-func (e *EconomyServer) balanceRoute(w http.ResponseWriter, r *http.Request) {
-	var u User
-
-	if _, err := fmt.Sscanf(r.PathValue("id"), "%s", &u); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	fmt.Fprint(w, e.GetBalance(u))
-}
-
-func (e *EconomyServer) adminTransactionsRoute(w http.ResponseWriter, r *http.Request) {
-	transactions, err := e.LastNTransactions(func(tx map[string]any) bool {
-		return true
-	}, 100)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	if err := json.NewEncoder(w).Encode(transactions); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-	}
-}
-
-func (e *EconomyServer) transactionsRoute(w http.ResponseWriter, r *http.Request) {
-	id := User(r.PathValue("id"))
-
-	transactions, err := e.LastNTransactions(func(tx map[string]any) bool {
-		return tx["From"] != nil && User(tx["From"].(string)) == id || tx["To"] != nil && User(tx["To"].(string)) == id
-	}, 100)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	if err := json.NewEncoder(w).Encode(transactions); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-	}
-}
-
-func (e *EconomyServer) transactRoute(w http.ResponseWriter, r *http.Request) {
-	var stx SentTx
-
-	if err := json.NewDecoder(r.Body).Decode(&stx); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	if err := e.Transact(stx); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	fmt.Println(c.InGreen(fmt.Sprintf("Transaction successful  %s -[%s]-> %s", stx.From, toReadable(stx.Amount), stx.To)))
-}
-
-func (e *EconomyServer) mintRoute(w http.ResponseWriter, r *http.Request) {
-	var sm SentMint
-
-	if err := json.NewDecoder(r.Body).Decode(&sm); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	if err := e.Mint(sm); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	fmt.Println(c.InGreen(fmt.Sprintf("Mint successful         %s <-[%s]-", sm.To, toReadable(sm.Amount))))
-}
-
-func (e *EconomyServer) burnRoute(w http.ResponseWriter, r *http.Request) {
-	var sb SentBurn
-
-	if err := json.NewDecoder(r.Body).Decode(&sb); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	if err := e.Burn(sb); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	fmt.Println(c.InGreen(fmt.Sprintf("Burn successful         %s -[%s]->", sb.From, toReadable(sb.Amount))))
-}
-
-func (e *EconomyServer) stipendRoute(w http.ResponseWriter, r *http.Request) {
-	var to User
-
-	if _, err := fmt.Sscanf(r.PathValue("id"), "%s", &to); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	if e.GetPrevStipend(to)+stipendTime > uint64(time.Now().UnixMilli()) {
-		http.Error(w, "Next stipend not available yet", http.StatusBadRequest)
-		return
-	}
-	if err := e.Stipend(to); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	fmt.Println(c.InGreen(fmt.Sprintf("Stipend successful      %s", to)))
-}
-
-func createFilepath() (file *os.File, err error) {
-	if file, err = os.OpenFile(currentFilepath, os.O_CREATE|os.O_APPEND|os.O_RDWR, 0o644); err != nil {
-		if !errors.Is(err, os.ErrNotExist) {
-			return nil, fmt.Errorf("failed to open ledger: %w", err)
-		}
-
-		fmt.Println(c.InPurple("Economy data folder not found, creating..."))
-		if err = os.MkdirAll(folderpath, 0o644); err != nil {
-			return nil, fmt.Errorf("failed to create *Economy data folder: %w", err)
-		}
-		if file, err = os.Create(currentFilepath); err != nil {
-			return nil, fmt.Errorf("failed to create ledger: %w", err)
-		}
-	}
-	return
-}
+// ... (Keep all your route functions: balanceRoute, transactRoute, etc. exactly as they were)
 
 func main() {
-	fmt.Println(c.InYellow("Loading ledger..."))
-	// create the file if it dont exist
+	fmt.Println(c.InYellow("🚀 Connecting to SurrealDB Cloud..."))
 
-	file, err := createFilepath()
-	if err != nil {
-		fmt.Println(c.InRed("Failed to create or open ledger: " + err.Error()))
-		os.Exit(1)
-	}
-	defer file.Close()
-
-	e, err := NewEconomy(file)
-	if err != nil {
-		fmt.Println(c.InRed("Failed to create economy: " + err.Error()))
-		os.Exit(1)
+	// 1. Get credentials from Render Environment
+	dbURL := os.Getenv("DB_URL")
+	if dbURL == "" {
+		// Fallback for local testing if env is missing
+		dbURL = "https://rosilo-06dmf6lsidp67225aee6c67su4.aws-usw2.surreal.cloud/rpc"
 	}
 
-	e.Stats()
+	// 2. Initialize the SurrealDB Client
+	db, err := surrealdb.New(dbURL)
+	if err != nil {
+		fmt.Printf(c.InRed("❌ Connection error: %v\n"), err)
+		os.Exit(1)
+	}
+
+	// 3. Sign in using System User Auth
+	_, err = db.Signin(map[string]interface{}{
+		"user": os.Getenv("SURREAL_USER"),
+		"pass": os.Getenv("SURREAL_PASS"),
+	})
+	if err != nil {
+		fmt.Printf(c.InRed("❌ Login failed (Check SURREAL_USER/PASS): %v\n"), err)
+		os.Exit(1)
+	}
+
+	// 4. Set Namespace and Database context
+	if _, err = db.Use(os.Getenv("SURREAL_NS"), os.Getenv("SURREAL_DB")); err != nil {
+		fmt.Printf(c.InRed("❌ Namespace/DB error: %v\n"), err)
+		os.Exit(1)
+	}
+
+	fmt.Println(c.InGreen("✅ Linked to Rosilo Cloud Database"))
+
+	// 5. Initialize Economy with the Database client instead of a file
+	e, err := NewEconomy(db) 
+	if err != nil {
+		fmt.Printf(c.InRed("❌ Economy Init failed: %v\n"), err)
+		os.Exit(1)
+	}
 
 	es := EconomyServer{Economy: e}
 
-	// http.HandleFunc("GET /currentFee", es.currentFeeRoute)
+	// Standard Routes
 	http.HandleFunc("GET /currentStipend", es.currentStipendRoute)
 	http.HandleFunc("GET /balance/{id}", es.balanceRoute)
 	http.HandleFunc("GET /transactions", es.adminTransactionsRoute)
@@ -192,7 +72,7 @@ func main() {
 	http.HandleFunc("POST /burn", es.burnRoute)
 	http.HandleFunc("POST /stipend/{id}", es.stipendRoute)
 
-	fmt.Println(c.InGreen("~ Economy service is up on port 2009 ~")) // 03/Jan/2009 Chancellor on brink of second bailout for banks
+	fmt.Println(c.InGreen("~ Economy service is up on port 2009 ~"))
 	if err := http.ListenAndServe(":2009", nil); err != nil {
 		fmt.Println(c.InRed("Failed to start server: " + err.Error()))
 		os.Exit(1)
