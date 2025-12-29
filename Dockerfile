@@ -1,9 +1,14 @@
 # --- STAGE 1: Build Go Economy Service ---
-FROM golang:1.23-alpine AS go-builder
+# Use 'latest' to get the most recent Go version available
+FROM golang:alpine AS go-builder
 WORKDIR /app
 COPY . .
 WORKDIR /app/Economy
-RUN go mod tidy && go build -o Economy_Binary main.go
+
+# FIX: Force the go.mod to use 1.23 so it matches the environment
+RUN go mod edit -go=1.23 && \
+    go mod tidy && \
+    go build -o Economy_Binary main.go
 
 # --- STAGE 2: Build SvelteKit Site ---
 FROM oven/bun:latest AS bun-builder
@@ -35,6 +40,5 @@ COPY --from=bun-builder /app/Site/node_modules /app/Site/node_modules
 
 EXPOSE 10000
 
-# FIX: Change directory to /app/Site before running the processes
-# This satisfies the "Current working directory should be the Site folder" check.
+# Start Economy and move into Site folder for Bun
 CMD ["sh", "-c", "Economy_Binary & cd /app/Site && bun run build/index.js"]
