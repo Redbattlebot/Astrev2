@@ -7,85 +7,102 @@ import {
 import { building } from "$app/environment"
 import initQuery from "$lib/server/init.surql"
 import logo from "$lib/server/logo"
+import fs from "node:fs"
+import path from "node:path"
 
-// --- 1. EXPORTS ---
+// --- 1. CONFIGURATION ---
+const DB_CONFIG = {
+	url: "wss://rosilo-06dmf6lsidp67225aee6c67su4.aws-usw2.surreal.cloud/rpc",
+	ns: "rosilo",
+	db: "rosilo",
+	user: "rosilo_owner",
+	pass: "Protogenslol1"
+};
+
+// --- 2. EXPORTS & SELF-HEALING WRAPPER ---
 export const db = new Surreal()
 
 const ogq = db.query.bind(db)
 const retriable = "This transaction can be retried"
 
+/**
+ * IMPROVED WRAPPER:
+ * 1. Automatically prepends 'USE NS...DB...' to ensure context.
+ * 2. Logs exact query failures for easier debugging on Render.
+ */
 db.query = async <T extends unknown[]>(
 	...args: QueryParameters
 ): Promise<Prettify<T>> => {
 	try {
+		if (typeof args[0] === 'string' && !args[0].trim().startsWith('USE ')) {
+			args[0] = `USE NS ${DB_CONFIG.ns} DB ${DB_CONFIG.db}; ${args[0]}`;
+		}
 		return (await ogq(...args)) as Prettify<T>
 	} catch (err) {
 		const e = err as Error
-		if (!e.message.endsWith(retriable)) throw e
-		console.log("Retrying query:", e.message)
+		if (e.message.endsWith(retriable)) {
+			console.log("🔄 Retrying query...");
+			return await db.query(...args);
+		}
+		console.error(`❌ Database Query Error: ${e.message}`);
+		throw e;
 	}
-	return await db.query(...args)
 }
 
 export const version = db.version.bind(db)
 
-// --- 2. AUTHENTICATION LOGIC ---
+// --- 3. AUTHENTICATION LOGIC ---
 async function reconnect() {
 	for (let attempt = 1; ; attempt++) {
 		try {
-			await db.close();
-			console.log(`🚀 Attempt ${attempt}: Using Legacy Root Auth...`);
+			if (db.status === 'open') await db.close();
 			
-			await db.connect("wss://rosilo-06dmf6lsidp67225aee6c67su4.aws-usw2.surreal.cloud/rpc");
+			console.log(`🚀 [Attempt ${attempt}] Connecting to SurrealDB Cloud...`);
+			await db.connect(DB_CONFIG.url);
 			
-			// Legacy Root Authentication
 			await db.signin({
-				username: "rosilo_owner",
-				password: "Protogenslol1",
+				username: DB_CONFIG.user,
+				password: DB_CONFIG.pass,
 			} as any);
 
-			// Await the context switch
-			await db.use({ ns: "rosilo", db: "rosilo" });
+			await db.use({ ns: DB_CONFIG.ns, db: DB_CONFIG.db });
 			
-			console.log("✅ AUTH SUCCESS! Root session established and Namespace selected.");
+			console.log("✅ AUTH SUCCESS: Connection established.");
 			break;
 		} catch (err) {
 			const e = err as Error;
 			console.error(`❌ Connection failed: ${e.message}`);
-			if (attempt >= 3) break;
+			if (attempt >= 3) {
+				console.error("🛑 Critical: Failed to connect after 3 attempts.");
+				break;
+			}
 			await new Promise(resolve => setTimeout(resolve, 2000));
 		}
 	}
 }
 
-// --- Authentication & Initialization Execution ---
+// --- 4. STARTUP & ASSET CHECK ---
 if (!building) {
-	// 1. Wait for the connection to finish
-	await reconnect(); 
+	// Debugging the ENOENT Error: Check if CSS exists where the app expects it
+	const cssPath = path.resolve(process.cwd(), "Assets/Themes/Standard.css");
+	if (!fs.existsSync(cssPath)) {
+		console.warn(`⚠️ ASSET WARNING: CSS file not found at ${cssPath}. This will cause a 500 error on the frontend.`);
+	}
 
-	// 2. Short delay to allow the WebSocket state to stabilize
+	await reconnect(); 
 	await new Promise(resolve => setTimeout(resolve, 500));
 
 	try {
-		console.log("🛠️ Running initial schema query...");
-		
-		/**
-		 * BULLETPROOF OVERRIDE: 
-		 * We explicitly prepend the USE command to the schema query.
-		 * This prevents the "Specify a namespace to use" error by forcing the 
-		 * database context regardless of connection-state race conditions.
-		 */
-		await db.query(`USE NS Rosilo DB rosilo; ${initQuery}`);
-
-		console.log("✅ Schema initialized successfully!");
+		console.log("🛠️ Initializing Schema...");
+		await db.query(initQuery);
+		console.log("✅ Schema Synced.");
 		logo();
 	} catch (err) {
-		const e = err as Error;
-		console.error(`❌ Schema Query Failed: ${e.message}`);
+		console.error("❌ Schema sync skipped or failed.");
 	}
 }
 
-// --- 3. HELPER TYPES & FUNCTIONS ---
+// --- 5. HELPER TYPES & FUNCTIONS ---
 type RecordIdTypes = {
 	asset: number; auditLog: string; banner: string; comment: string;
 	created: string; createdAsset: string; dislikes: string; follows: string;
@@ -99,30 +116,14 @@ type RecordIdTypes = {
 }
 
 export type RecordId<T extends keyof RecordIdTypes> = SurrealRecordId<T>
+export const Record = <T extends keyof RecordIdTypes>(table: T, id: RecordIdTypes[T]) => new SurrealRecordId(table, id)
 
-export const Record = <T extends keyof RecordIdTypes>(
-	table: T,
-	id: RecordIdTypes[T]
-) => new SurrealRecordId(table, id)
-
-export async function find<T extends keyof RecordIdTypes>(
-	table: T,
-	id: RecordIdTypes[T]
-) {
-	const [result] = await db.query<boolean[]>("!!SELECT 1 FROM $thing", {
-		thing: Record(table, id),
-	})
+export async function find<T extends keyof RecordIdTypes>(table: T, id: RecordIdTypes[T]) {
+	const [result] = await db.query<boolean[]>("!!SELECT 1 FROM $thing", { thing: Record(table, id) })
 	return result
 }
 
-export async function findWhere(
-	table: keyof RecordIdTypes,
-	where: string,
-	params?: { [_: string]: unknown }
-) {
-	const [res] = await db.query<boolean[]>(
-		`!!SELECT 1 FROM type::table($table) WHERE ${where}`,
-		{ ...params, table }
-	)
+export async function findWhere(table: keyof RecordIdTypes, where: string, params?: { [_: string]: unknown }) {
+	const [res] = await db.query<boolean[]>(`!!SELECT 1 FROM type::table($table) WHERE ${where}`, { ...params, table })
 	return res
 }
