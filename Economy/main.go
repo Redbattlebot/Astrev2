@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context" // Added
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -129,7 +130,8 @@ func main() {
 		os.Exit(1)
 	}
 
-	_, err = db.Signin(map[string]interface{}{
+	// FIX 1: Use SignIn (capitalized) and context.Background()
+	_, err = db.SignIn(context.Background(), map[string]interface{}{
 		"user": os.Getenv("SURREAL_USER"),
 		"pass": os.Getenv("SURREAL_PASS"),
 	})
@@ -138,7 +140,8 @@ func main() {
 		os.Exit(1)
 	}
 
-	if _, err = db.Use(os.Getenv("SURREAL_NS"), os.Getenv("SURREAL_DB")); err != nil {
+	// FIX 2: Use context.Background() and capture only 1 return value (error)
+	if err = db.Use(context.Background(), os.Getenv("SURREAL_NS"), os.Getenv("SURREAL_DB")); err != nil {
 		fmt.Printf(c.InRed("❌ Namespace/DB error: %v\n"), err)
 		os.Exit(1)
 	}
