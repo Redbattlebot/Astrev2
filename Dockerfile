@@ -36,4 +36,4 @@ EXPOSE 10000
 # 6. Launch Sequence
 # We use 'pkill -f' to clear any ghost Economy processes before starting
 WORKDIR /app/Site
-CMD pkill -f Economy_Binary || true && /app/Economy_Binary & bun run build/index.js
+CMD /app/Economy_Binary & cd /app/Site && bun run build/index.js
