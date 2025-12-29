@@ -16,7 +16,7 @@ const DB_CONFIG = {
 	ns: "rosilo",
 	db: "rosilo",
 	user: "rosilo_owner",
-	pass: "Protogenslol1"
+	pass: "Ewt%gu(sn9s%MgU*UGxMPKs"
 };
 
 // --- 2. EXPORTS & SELF-HEALING WRAPPER ---
