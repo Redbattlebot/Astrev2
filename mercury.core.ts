@@ -2,7 +2,7 @@
 // If you're running in production, you'll need to rebuild Mercury Core to apply changes.
 
 export default {
-	Name: "Mercury",
+	Name: "Rosilo",
 	Domain: "astrev.onrender.com",
 	DatabaseURL: "http://localhost:8000",
 	RCCServiceProxyURL: "http://localhost:64990",
@@ -29,9 +29,9 @@ export default {
 	},
 
 	Branding: {
-		Favicon: "Branding/Favicon.svg",
-		Icon: "Branding/Icon.svg",
-		Tagline: "Revival tagline",
+		Favicon: "Branding/Favicon.png", // No ../ at the start
+    Icon: "Branding/Icon.png",     // No ../ at the start
+		Tagline: "Welcome to Rosilo",
 		Descriptions: {
 			"Endless possibilites":
 				"Create or play your favourite games and customise your character with items on our catalog.",
