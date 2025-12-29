@@ -32,48 +32,32 @@ export const version = db.version.bind(db)
 
 // --- 2. AUTHENTICATION LOGIC ---
 async function reconnect() {
-	for (let attempt = 1; ; attempt++) {
-		try {
-			await db.close() 
-			console.log(`🚀 Attempt ${attempt}: Using Legacy Root Auth...`)
-			
-			await db.connect("wss://rosilo-06dmf6lsidp67225aee6c67su4.aws-usw2.surreal.cloud/rpc")
-			
-			// If we omit 'access', the SDK tries to log in as a global Root user
-			// This often solves the "Access method does not exist" error
-			await db.signin({
-				username: "rosilo_owner",
-				password: "Protogenslol1",
-				// We intentionally omit 'access' here to use default root auth
-			} as any)
+    for (let attempt = 1; ; attempt++) {
+        try {
+            await db.close();
+            console.log(`🚀 Attempt ${attempt}: Using Legacy Root Auth...`);
+            
+            await db.connect("wss://rosilo-06dmf6lsidp67225aee6c67su4.aws-usw2.surreal.cloud/rpc");
+            
+            // 1. Authenticate (This passed in your last log!)
+            await db.signin({
+                username: "rosilo_owner",
+                password: "Protogenslol1",
+            } as any);
 
-			await db.use({ ns: "Rosilo", db: "rosilo" })
-			
-			console.log("✅ AUTH SUCCESS! Root session established via Legacy Auth.")
-			break
-		} catch (err) {
-			const e = err as Error
-			console.error(`❌ Connection failed: ${e.message}`)
-			
-			// If Legacy fails, try 'root' as the access name (common in SurrealDB 2.x)
-			if (attempt === 1) {
-				try {
-					console.log("🔄 Retrying with access: 'root'...")
-					await db.signin({
-						username: "rosilo_owner",
-						password: "YOUR_PASSWORD",
-						access: "root"
-					} as any)
-					await db.use({ ns: "Rosilo", db: "rosilo" })
-					console.log("✅ AUTH SUCCESS (Access: root)")
-					break
-				} catch (inner) { console.error("❌ Root fallback also failed.") }
-			}
-
-			if (attempt >= 3) break
-			await new Promise(resolve => setTimeout(resolve, 2000))
-		}
-	}
+            // 2. CRITICAL: We must AWAIT the use command 
+            // before the code moves on to db.query(initQuery)
+            await db.use({ ns: "Rosilo", db: "rosilo" });
+            
+            console.log("✅ AUTH SUCCESS! Root session established and Namespace selected.");
+            break;
+        } catch (err) {
+            const e = err as Error;
+            console.error(`❌ Connection failed: ${e.message}`);
+            if (attempt >= 3) break;
+            await new Promise(resolve => setTimeout(resolve, 2000));
+        }
+    }
 }
 
 // Only run the connection if the app is starting up (not during build)
