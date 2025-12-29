@@ -1,7 +1,7 @@
 package ledger
 
 import (
-	"context" // Added this
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -108,18 +108,14 @@ func unmarshal(data interface{}, v interface{}) error {
 }
 
 func (e *Economy) loadFromCloud() error {
-	// Added context.Background()
+	// FIX: Select returns a slice of the type provided in the generic
 	data, err := surrealdb.Select[map[string]interface{}](context.Background(), e.db, "ledger")
 	if err != nil {
 		return err
 	}
 
-	var events []map[string]interface{}
-	if err := unmarshal(data, &events); err != nil {
-		return err
-	}
-
-	for _, event := range events {
+	// data is already []map[string]interface{} because of the generic above
+	for _, event := range data {
 		amountRaw, _ := event["Amount"].(float64)
 		amount := Currency(amountRaw)
 
@@ -146,7 +142,6 @@ func (e *Economy) Transact(sent SentTx) error {
 	if err := e.validateTx(sent); err != nil { return err }
 	tx := Tx{sent, uint64(time.Now().UnixMilli()), ""}
 	
-	// Added context.Background()
 	if _, err := surrealdb.Create[Tx](context.Background(), e.db, "ledger", tx); err != nil { return err }
 
 	e.loadTx(tx)
@@ -157,7 +152,6 @@ func (e *Economy) Mint(sent SentMint) error {
 	if err := e.validateMint(sent); err != nil { return err }
 	mint := Mint{sent, uint64(time.Now().UnixMilli()), ""}
 
-	// Added context.Background()
 	if _, err := surrealdb.Create[Mint](context.Background(), e.db, "ledger", mint); err != nil { return err }
 
 	e.loadMint(mint)
@@ -168,7 +162,6 @@ func (e *Economy) Burn(sent SentBurn) error {
 	if err := e.validateBurn(sent); err != nil { return err }
 	burn := Burn{sent, uint64(time.Now().UnixMilli()), ""}
 
-	// Added context.Background()
 	if _, err := surrealdb.Create[Burn](context.Background(), e.db, "ledger", burn); err != nil { return err }
 
 	e.loadBurn(burn)
@@ -219,11 +212,15 @@ func (e *Economy) Stipend(to User) error {
 }
 
 func (e *Economy) LastNTransactions(validate func(tx map[string]any) bool, n int) ([]map[string]any, error) {
-	// Added context.Background()
-	data, err := surrealdb.Query[[]map[string]any](context.Background(), e.db, "SELECT * FROM ledger ORDER BY Time DESC LIMIT $n", map[string]interface{}{"n": n})
+	// FIX: Query returns a slice of Results. We need to unmarshal the result set correctly.
+	raw, err := surrealdb.Query[[]map[string]any](context.Background(), e.db, "SELECT * FROM ledger ORDER BY Time DESC LIMIT $n", map[string]interface{}{"n": n})
 	if err != nil { return nil, err }
 	
-	var result []map[string]any
-	if err := unmarshal(data, &result); err != nil { return nil, err }
-	return result, nil
+	// Query returns a slice where each element is the result of one statement.
+	// Since we only have one statement, we take the first element.
+	if len(raw) > 0 {
+		return raw[0], nil
+	}
+	
+	return []map[string]any{}, nil
 }
