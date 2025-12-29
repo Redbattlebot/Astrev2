@@ -16,7 +16,6 @@ const DB_CONFIG = {
 	ns: "rosilo",
 	db: "rosilo",
 	user: "rosilo_owner",
-	// Use process.env.DB_PASSWORD in Render for extra security!
 	pass: "Ewt%gu(sn9s%MgU*UGxMPKs" 
 };
 
@@ -30,7 +29,6 @@ const retriable = "This transaction can be retried"
  * SMART WRAPPER:
  * 1. Injects Namespace/DB context.
  * 2. FLATTENS results: If the query has 1 statement, it returns the result set directly.
- * This prevents the [[user]] vs [user] error in hundreds of files.
  */
 db.query = async <T extends unknown[]>(
 	...args: QueryParameters
@@ -42,8 +40,7 @@ db.query = async <T extends unknown[]>(
 
 		const raw = await ogq(...args);
 
-		// --- THE FLATTENER ---
-		// If it's a single statement query, return the inner array so [user] works.
+		// THE FLATTENER: If it's a single statement query, return the inner array.
 		if (Array.isArray(raw) && raw.length === 1) {
 			return raw[0] as Prettify<T>;
 		}
@@ -92,12 +89,12 @@ async function reconnect() {
 	}
 }
 
-// --- 4. STARTUP & ASSET CHECK ---
+// --- 4. STARTUP & SCHEMA INITIALIZATION ---
 if (!building) {
-	// Debugging path issues on Render/Linux
+	// Debugging path issues for Linux/Render
 	const cssPath = path.resolve(process.cwd(), "Assets/Themes/Standard.css");
 	if (!fs.existsSync(cssPath)) {
-		console.warn(`⚠️ ASSET WARNING: CSS file not found at ${cssPath}. Check case-sensitivity (Assets vs assets).`);
+		console.warn(`⚠️ ASSET WARNING: CSS file not found at ${cssPath}.`);
 	}
 
 	await reconnect(); 
@@ -105,12 +102,12 @@ if (!building) {
 
 	try {
 		console.log("🛠️ Initializing Schema...");
-		// Running the full init script
-		await ogq(initQuery); 
+		// We use ogq directly here to bypass the flattener for the large initQuery script
+		await ogq(`USE NS ${DB_CONFIG.ns} DB ${DB_CONFIG.db}; ${initQuery}`); 
 		console.log("✅ Schema Synced.");
 		logo();
 	} catch (err) {
-		console.error("❌ Schema sync failed. Check your init.surql syntax.");
+		console.error("❌ Schema sync failed:", (err as Error).message);
 	}
 }
 
@@ -132,10 +129,12 @@ export const Record = <T extends keyof RecordIdTypes>(table: T, id: RecordIdType
 
 export async function find<T extends keyof RecordIdTypes>(table: T, id: RecordIdTypes[T]) {
 	const result = await db.query<boolean[]>("!!SELECT 1 FROM $thing", { thing: Record(table, id) })
-	return result[0]
+    // With flattener, result is already the inner array
+	return result ? result[0] : undefined;
 }
 
 export async function findWhere(table: keyof RecordIdTypes, where: string, params?: { [_: string]: unknown }) {
 	const res = await db.query<boolean[]>(`!!SELECT 1 FROM type::table($table) WHERE ${where}`, { ...params, table })
-	return res[0]
+    // With flattener, res is already the inner array
+	return res ? res[0] : undefined;
 }
