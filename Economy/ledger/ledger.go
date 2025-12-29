@@ -1,6 +1,7 @@
 package ledger
 
 import (
+	"context" // Added this
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -107,8 +108,8 @@ func unmarshal(data interface{}, v interface{}) error {
 }
 
 func (e *Economy) loadFromCloud() error {
-	// NEW SYNTAX: Use surrealdb.Select(e.db, "ledger")
-	data, err := surrealdb.Select[map[string]interface{}](e.db, "ledger")
+	// Added context.Background()
+	data, err := surrealdb.Select[map[string]interface{}](context.Background(), e.db, "ledger")
 	if err != nil {
 		return err
 	}
@@ -145,8 +146,8 @@ func (e *Economy) Transact(sent SentTx) error {
 	if err := e.validateTx(sent); err != nil { return err }
 	tx := Tx{sent, uint64(time.Now().UnixMilli()), ""}
 	
-	// NEW SYNTAX: Use surrealdb.Create
-	if _, err := surrealdb.Create[Tx](e.db, "ledger", tx); err != nil { return err }
+	// Added context.Background()
+	if _, err := surrealdb.Create[Tx](context.Background(), e.db, "ledger", tx); err != nil { return err }
 
 	e.loadTx(tx)
 	return nil
@@ -156,7 +157,8 @@ func (e *Economy) Mint(sent SentMint) error {
 	if err := e.validateMint(sent); err != nil { return err }
 	mint := Mint{sent, uint64(time.Now().UnixMilli()), ""}
 
-	if _, err := surrealdb.Create[Mint](e.db, "ledger", mint); err != nil { return err }
+	// Added context.Background()
+	if _, err := surrealdb.Create[Mint](context.Background(), e.db, "ledger", mint); err != nil { return err }
 
 	e.loadMint(mint)
 	return nil
@@ -166,7 +168,8 @@ func (e *Economy) Burn(sent SentBurn) error {
 	if err := e.validateBurn(sent); err != nil { return err }
 	burn := Burn{sent, uint64(time.Now().UnixMilli()), ""}
 
-	if _, err := surrealdb.Create[Burn](e.db, "ledger", burn); err != nil { return err }
+	// Added context.Background()
+	if _, err := surrealdb.Create[Burn](context.Background(), e.db, "ledger", burn); err != nil { return err }
 
 	e.loadBurn(burn)
 	return nil
@@ -216,8 +219,8 @@ func (e *Economy) Stipend(to User) error {
 }
 
 func (e *Economy) LastNTransactions(validate func(tx map[string]any) bool, n int) ([]map[string]any, error) {
-	// NEW SYNTAX: Use surrealdb.Query
-	data, err := surrealdb.Query[[]map[string]any](e.db, "SELECT * FROM ledger ORDER BY Time DESC LIMIT $n", map[string]interface{}{"n": n})
+	// Added context.Background()
+	data, err := surrealdb.Query[[]map[string]any](context.Background(), e.db, "SELECT * FROM ledger ORDER BY Time DESC LIMIT $n", map[string]interface{}{"n": n})
 	if err != nil { return nil, err }
 	
 	var result []map[string]any
